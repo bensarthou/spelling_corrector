@@ -6,14 +6,24 @@ from collections import Counter
 UNK = "<unk>"
 
 
-def get_states_observations(data, min_observation_count=10):
+def get_states_observations(data, min_observation_count=0):
+    """
+    Find all different possible values for states and observations.
+    :param data: list of sequences, each sequence being a list of tuples (observation, state)
+    :param min_observation_count: (default 0) int, if >=1, only observations observed more than this minimum
+           number of times are considered. An observation UNK is added to represent all discarded observations.
+    :return states, observations: sorted list of all possible states and observations
+    """
 
-    # STATES (POS tags)
-    states = list({token[1] for sequence in data for token in sequence})
+    # STATES (2nd value of each tuple)
+    states = sorted(list({token[1] for sequence in data for token in sequence}))
 
-    # OBSERVATIONS (words counted at least 10 times)
-    obs_counts = Counter([token[0] for sequence in data for token in sequence])
-    observations = [obs for (obs, count) in obs_counts.items() if count >= min_observation_count] + [UNK]
+    # OBSERVATIONS (1st value of each tuple)
+    observations = sorted(list({token[0] for sequence in data for token in sequence}))
+
+    if min_observation_count > 0:
+        obs_counts = Counter([token[0] for sequence in data for token in sequence])
+        observations = sorted([obs for (obs, count) in obs_counts.items() if count >= min_observation_count] + [UNK])
 
     return states, observations
 
@@ -34,26 +44,26 @@ class HMM:
         initial_state_proba is the initial state distribution
             [pi_i] pi_i = Pr(Y_0=q_i)
         """
-        self.N = len(state_list)         # The number of states
-        self.M = len(observation_list)   # The number of words in the vocabulary
-        self.omega_Y = list(set(state_list))        # Keep the vocabulary of tags
-        self.omega_X = list(set(observation_list))  # Keep the vocabulary of words
+        self.omega_Y = sorted(list(set(state_list)))        # Keep the vocabulary of tags
+        self.omega_X = sorted(list(set(observation_list)))  # Keep the vocabulary of words
+        self.n_states = len(state_list)               # The number of states
+        self.n_observations = len(observation_list)   # The number of words in the vocabulary
 
-        print("HMM creating with: ")
-        print(" * {} states".format(self.N))
-        print(" * {} observations".format(self.M))
+        print("HMM created with: ")
+        print(" * {} states".format(self.n_states))
+        print(" * {} observations".format(self.n_observations))
 
         # Init. of the 3 distributions : observation, transition and initial states
         if transition_proba is None:
-            self.transition_proba = np.zeros( (self.N, self.N), float)
+            self.transition_proba = np.zeros( (self.n_states, self.n_states), float)
         else:
             self.transition_proba = transition_proba
         if observation_proba is None:
-            self.observation_proba = np.zeros( (self.M, self.N), float)
+            self.observation_proba = np.zeros( (self.n_observations, self.n_states), float)
         else:
             self.observation_proba = observation_proba
         if initial_state_proba is None:
-            self.initial_state_proba = np.zeros( (self.N,), float )
+            self.initial_state_proba = np.zeros( (self.n_states,), float )
         else:
             self.initial_state_proba = initial_state_proba
 
@@ -69,13 +79,13 @@ class HMM:
         to their index in the probabilities arrays
         """
         self.Y_index = {}
-        for i in range(self.N):
+        for i in range(self.n_states):
             self.Y_index[self.omega_Y[i]] = i
         self.X_index = {}
-        for i in range(self.M):
+        for i in range(self.n_observations):
             self.X_index[self.omega_X[i]] = i
 
-    def train(self, train_set):
+    def fit(self, train_set):
         """
         Estimate HMM parameters from a training data set.
         train_set is a list of sequences,
@@ -109,7 +119,7 @@ class HMM:
         Estimate observations probabilities given states, P(X|Y).
         """
         # reset observation matrix
-        self.observation_proba = np.zeros((self.M, self.N), float)
+        self.observation_proba = np.zeros((self.n_observations, self.n_states), float)
 
         # get counts
         for sequence in train_set:
@@ -129,7 +139,7 @@ class HMM:
         Estimate transitions probabilities given states, P(Y(t)|Y(t-1))
         """
         # reset transition matrix
-        self.transition_proba = np.zeros((self.N, self.N), float)
+        self.transition_proba = np.zeros((self.n_states, self.n_states), float)
 
         # get counts
         for sequence in train_set:
@@ -161,8 +171,8 @@ class HMM:
 
         # init variables
         n_obs = len(obs_seq)
-        prob_table = np.zeros((self.N, n_obs))
-        path_table = np.zeros((self.N, n_obs))
+        prob_table = np.zeros((self.n_states, n_obs))
+        path_table = np.zeros((self.n_states, n_obs))
 
         # initial state
         prob_table[:, 0] = self.observation_proba[obs_seq[0], :] * self.initial_state_proba
@@ -170,7 +180,7 @@ class HMM:
 
         # loop for each observation
         for k in range(1, n_obs):
-            for i_state in range(self.N):
+            for i_state in range(self.n_states):
                 p_state_given_prev_state_and_obs = prob_table[:, k-1] * self.transition_proba[i_state, :] * self.observation_proba[int(obs_seq[k]), i_state]
                 prob_table[i_state, k] = np.max(p_state_given_prev_state_and_obs)
                 path_table[i_state, k] = np.argmax(p_state_given_prev_state_and_obs)
@@ -191,7 +201,7 @@ class HMM:
         return states_sequence #, states_sequence_proba
 
 
-    def score(self, test_set, ignore_unk=False):
+    def score(self, test_set, ignore_unk=True):
         """
         Run predictions on each observation sequence of the test set and return precision score.
         """
