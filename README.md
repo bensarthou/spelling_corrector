@@ -1,4 +1,16 @@
-README
+# Typo corrector using HMM
+
+## Exploration of HMM algorithms
+
+- forward-backward
+- 2nd order HMM
+- smoothing for proba estimations
+- 2nd order observations
+- add initial states for state 0 and 1
+
+[HOHMM implementation](https://github.com/jacobkrantz/Simple-HOHMM/blob/master/)
+
+
 
 ## Noisy insertion of characters
 
@@ -9,7 +21,7 @@ c    -> d
 b    -> a
 .    -> b
 ```
-Idea: Adding a "empty state"
+Idea: Add an "empty state"
 
 
 
