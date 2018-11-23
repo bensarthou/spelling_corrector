@@ -38,16 +38,16 @@ class HMM:
         state_list is the list of state symbols [q_0...q_(N-1)]
         observation_list is the list of observation symbols [v_0...v_(M-1)]
         transition_proba is the transition probability matrix
-            [a_ij] a_ij = Pr(Y_(t+1)=q_i|Y_t=q_j)
+            [a_ij] a_ij = Pr(Y_(t+1)=q_j|Y_t=q_i)
         observation_proba is the observation probablility matrix
-            [b_ki] b_ki = Pr(X_t=v_k|Y_t=q_i)
+            [b_ik] b_ik = Pr(X_t=v_k|Y_t=q_i)
         initial_state_proba is the initial state distribution
             [pi_i] pi_i = Pr(Y_0=q_i)
         """
-        self.omega_Y = sorted(list(set(state_list)))        # Keep the vocabulary of tags
-        self.omega_X = sorted(list(set(observation_list)))  # Keep the vocabulary of words
+        self.omega_Y = sorted(list(set(state_list)))        # Keep the vocabulary of states
+        self.omega_X = sorted(list(set(observation_list)))  # Keep the vocabulary of observations
         self.n_states = len(state_list)               # The number of states
-        self.n_observations = len(observation_list)   # The number of words in the vocabulary
+        self.n_observations = len(observation_list)   # The number of observations
 
         print("HMM created with: ")
         print(" * {} states".format(self.n_states))
@@ -59,7 +59,7 @@ class HMM:
         else:
             self.transition_proba = transition_proba
         if observation_proba is None:
-            self.observation_proba = np.zeros( (self.n_observations, self.n_states), float)
+            self.observation_proba = np.zeros( (self.n_states, self.n_observations), float)
         else:
             self.observation_proba = observation_proba
         if initial_state_proba is None:
@@ -121,7 +121,7 @@ class HMM:
         Estimate observations probabilities given states, P(X|Y).
         """
         # reset observation matrix
-        self.observation_proba = np.zeros((self.n_observations, self.n_states), float)
+        self.observation_proba = np.zeros((self.n_states, self.n_observations), float)
 
         # get counts
         for sequence in train_set:
@@ -130,10 +130,10 @@ class HMM:
                 if obs not in self.X_index.keys():
                     obs = UNK
                 # update counts
-                self.observation_proba[self.X_index[obs], self.Y_index[state]] += 1
+                self.observation_proba[self.Y_index[state], self.X_index[obs]] += 1
 
-        # normalize observation proba
-        self.observation_proba /= np.sum(self.observation_proba, axis=0)
+        # normalize observation proba (normalize each line to 1)
+        self.observation_proba /= np.atleast_2d(np.sum(self.observation_proba, axis=1)).T
 
 
     def train_transitions_proba(self, train_set):
@@ -148,10 +148,10 @@ class HMM:
             for i_token in range(len(sequence)-1):
                 old_state = sequence[i_token][1]
                 new_state = sequence[i_token+1][1]
-                self.transition_proba[self.Y_index[new_state], self.Y_index[old_state]] += 1
+                self.transition_proba[self.Y_index[old_state], self.Y_index[new_state]] += 1
 
-        # normalize observation proba
-        self.transition_proba /= np.sum(self.transition_proba, axis=0)
+        # normalize observation proba (normalize each line to 1)
+        self.transition_proba /= np.atleast_2d(np.sum(self.transition_proba, axis=1)).T
 
 
     def viterbi_forward(self, observations_sequence):
@@ -177,13 +177,13 @@ class HMM:
         path_table = np.zeros((self.n_states, n_obs))
 
         # initial state
-        prob_table[:, 0] = self.observation_proba[obs_seq[0], :] * self.initial_state_proba
+        prob_table[:, 0] = self.observation_proba[:, obs_seq[0]] * self.initial_state_proba
         path_table[:, 0] = 0
 
         # loop for each observation
         for k in range(1, n_obs):
             for i_state in range(self.n_states):
-                p_state_given_prev_state_and_obs = prob_table[:, k-1] * self.transition_proba[i_state, :] * self.observation_proba[int(obs_seq[k]), i_state]
+                p_state_given_prev_state_and_obs = prob_table[:, k-1] * self.transition_proba[:, i_state] * self.observation_proba[i_state, int(obs_seq[k])]
                 prob_table[i_state, k] = np.max(p_state_given_prev_state_and_obs)
                 path_table[i_state, k] = np.argmax(p_state_given_prev_state_and_obs)
 
