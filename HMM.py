@@ -85,6 +85,7 @@ class HMM:
         for i in range(self.n_observations):
             self.X_index[self.omega_X[i]] = i
 
+
     def fit(self, train_set):
         """
         Estimate HMM parameters from a training data set.
@@ -103,6 +104,7 @@ class HMM:
         print("Training observations probabilities given states...", end="")
         self.train_observations_proba(train_set)
         print(" Done.")
+
 
     def train_initstate_proba(self, train_set):
         """
@@ -152,7 +154,7 @@ class HMM:
         self.transition_proba /= np.sum(self.transition_proba, axis=0)
 
 
-    def predict(self, observation_sequence):
+    def viterbi_forward(self, observations_sequence):
         """
         Predict the most probable sequence of states from a sequence of observations using Viterbi algorithm.
         :param obs_seq: [array (n_obs,)] sequence of real observations along time
@@ -162,7 +164,7 @@ class HMM:
         # ---- CONVERSION OF SEQUENCE WITH INDEXES
 
         obs_seq = []
-        for obs in observation_sequence:
+        for obs in observations_sequence:
             if obs not in self.X_index.keys():
                 obs = UNK
             obs_seq.append(self.X_index[obs])
@@ -201,6 +203,18 @@ class HMM:
         return states_sequence #, states_sequence_proba
 
 
+    def predict(self, observations_sequences):
+        """
+        Predict the sequences of states from sequences of observations.
+        :param observations_sequences: list of list of observations
+        :return states_sequences: list of list of predicted states
+        """
+        states_sequences = []
+        for obs_seq in observations_sequences:
+            states_sequences.append(self.viterbi_forward(obs_seq))
+        return states_sequences
+
+
     def score(self, test_set, ignore_unk=True):
         """
         Run predictions on each observation sequence of the test set and return precision score.
@@ -212,7 +226,7 @@ class HMM:
             # run prediction
             obs_seq = [token[0] for token in sequence]
             states_seq = [token[1] for token in sequence]
-            pred_states_seq = self.predict(obs_seq)
+            pred_states_seq = self.viterbi_forward(obs_seq)
 
             # if UNK are ignored, remove their predictions
             if ignore_unk:

@@ -1,2 +1,4 @@
 typos-datas/
 *.pyc
+data/
+.ipynb_checkpoints/
