@@ -132,6 +132,7 @@ def noisy_insertion(train_set, test_set, thresh_proba=0.05):
 
     return noisy_train_set, noisy_test_set
 
+
 def noisy_insertion_dataset(dataset, hmm, thresh_proba=0.05):
 
     """
@@ -160,6 +161,75 @@ def noisy_insertion_dataset(dataset, hmm, thresh_proba=0.05):
                 new_observation = np.random.choice(hmm.omega_X, size=1, p=obs_distribution)
                 new_letter = (str(list(new_observation)[0]), '_')
                 new_word.append(new_letter)
+
+        noisy_dataset.append(new_word)
+
+    return noisy_dataset
+
+
+def noisy_omission(train_set, test_set, thresh_proba=0.05):
+    """
+    Given a train and test dataset of letters (observed, real) return
+     datasets with noisy omissions of letters, meaning an  unique observation can come from
+     two successives states.
+
+    :param train_set: list of list of tuple (observation, state), used for training the HMM model
+    :param test_set: list of list of tuple (observation, state)
+    :param thresh_proba: float, threshold under which we remove a state
+
+    :return noisy_train_set, train_set with omitted observations
+    :return noisy_test_set, test_set with omitted observations
+
+    """
+
+    noisy_train_set = noisy_omission_dataset(train_set, thresh_proba=thresh_proba)
+    noisy_test_set = noisy_omission_dataset(test_set, thresh_proba=thresh_proba)
+
+    return noisy_train_set, noisy_test_set
+
+
+def noisy_omission_dataset(dataset, thresh_proba=0.05):
+
+    """
+    Given a dataset of letters (observed and real), add noisy deletion of
+     letters in the dataset, by combining 2 successives states, giving an unique observation.
+
+    :param dataset: list of list of tuple (observation, state)
+    :param thresh_proba: float, threshold under which we add an observation
+
+    :return a noisy dataset, with deletion of observation (same format as dataset)
+    """
+
+    noisy_dataset = []
+    for word in dataset:
+        new_word = []
+        i = 0
+        while i < len(word)-1:
+            skip = False
+
+            r = np.random.rand()
+            if r < thresh_proba:
+
+                skip = True
+
+                observation_next_letter = word[i+1][0]
+                state_letter, state_next_letter = word[i][1], word[i+1][1]
+
+                # Combine the two states (current and previous) into one
+                new_letter = (observation_next_letter, state_letter + state_next_letter)
+                new_word.append(new_letter)
+
+                i += 2
+
+            else:
+
+                new_word.append(word[i])
+                i += 1
+
+        # at the end of the word, if we haven't already skip the last observation due to omission,
+        #    add the last letter to the word
+        if not skip:
+            new_word.append(word[len(word)-1])
 
         noisy_dataset.append(new_word)
 
