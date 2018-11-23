@@ -1,0 +1,33 @@
+README
+
+## Noisy insertion of characters
+
+State   Observation
+```
+a    -> a
+c    -> d
+b    -> a
+.    -> b
+```
+Idea: Adding a "empty state"
+
+
+
+
+## Omission of characters
+
+State   Observation
+```
+a    -> a
+c    -> d
+b    -> .
+b    -> b
+
+a    -> a
+c    -> d
+bb   -> b
+```
+Idea: Changing state space from S (of size N) to state space SxS (of size N^2)
+
+For the database, randomly select 2 successives letters (of same word if possible)
+and concatenate the states (making the first observation disappear)
