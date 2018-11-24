@@ -6,20 +6,21 @@ from collections import Counter
 UNK = "<unk>"
 
 
-def get_states_observations(data, min_observation_count=0):
+def get_observations_states(X, y, min_observation_count=0):
     """
     Find all different possible values for states and observations.
-    :param data: list of sequences, each sequence being a list of tuples (observation, state)
+    :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+    :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
     :param min_observation_count: (default 0) int, if >=1, only observations observed more than this minimum
            number of times are considered. An observation UNK is added to represent all discarded observations.
     :return states, observations: sorted list of all possible states and observations
     """
 
-    # STATES (2nd value of each tuple)
-    states = sorted(list({token[1] for sequence in data for token in sequence}))
+    # STATES
+    states = sorted(list({state for state_seq in y for state in state_seq}))
 
-    # OBSERVATIONS (1st value of each tuple)
-    observations = sorted(list({token[0] for sequence in data for token in sequence}))
+    # OBSERVATIONS
+    observations = sorted(list({obs for obs_seq in y for obs in obs_seq}))
 
     if min_observation_count > 0:
         obs_counts = Counter([token[0] for sequence in data for token in sequence])
@@ -34,22 +35,22 @@ class HMM:
                  observation_proba = None,
                  initial_state_proba = None):
         """
-        Builds a new Hidden Markov Model
-        state_list is the list of state symbols [q_0...q_(N-1)]
-        observation_list is the list of observation symbols [v_0...v_(M-1)]
+        Builds a 1st order Hidden Markov Model
+        state_list is the list of state symbols [s_0...s_(N-1)]
+        observation_list is the list of observation symbols [o_0...o_(M-1)]
         transition_proba is the transition probability matrix
-            [a_ij] a_ij = Pr(Y_(t+1)=q_j|Y_t=q_i)
+            [a_ij] a_ij = Pr(Y_(t+1)=s_j|Y_t=s_i)
         observation_proba is the observation probablility matrix
-            [b_ik] b_ik = Pr(X_t=v_k|Y_t=q_i)
+            [b_ik] b_ik = Pr(X_t=o_k|Y_t=s_i)
         initial_state_proba is the initial state distribution
-            [pi_i] pi_i = Pr(Y_0=q_i)
+            [pi_i] pi_i = Pr(Y_0=s_i)
         """
         self.omega_Y = sorted(list(set(state_list)))        # Keep the vocabulary of states
         self.omega_X = sorted(list(set(observation_list)))  # Keep the vocabulary of observations
         self.n_states = len(state_list)               # The number of states
         self.n_observations = len(observation_list)   # The number of observations
 
-        print("HMM created with: ")
+        print("1st order HMM created with: ")
         print(" * {} states".format(self.n_states))
         print(" * {} observations".format(self.n_observations))
 
@@ -86,46 +87,46 @@ class HMM:
             self.X_index[self.omega_X[i]] = i
 
 
-    def fit(self, train_set):
+    def fit(self, X, y):
         """
-        Estimate HMM parameters from a training data set.
-        train_set is a list of sequences,
-        each sequence is a list of tokens,
-        each token is a tuple ('state', 'observation')
-        Ex: train_set = [[('obs3', 'state1'), ('obs2', 'state2'), ('obs1', 'state3')],
-                         [('obs2', 'state4'), ('obs1', 'state3'), ('obs2', 'state3'), ('obs3', 'state3')]]
+        Estimate HMM parameters (initial, transition and emisson matrices) from a training data set.
+        :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
         print("Training initial states probabilities...", end="")
-        self.train_initstate_proba(train_set)
+        self.train_initstate_proba(y)
         print(" Done.")
         print("Training transitions probabilities given states...", end="")
-        self.train_transitions_proba(train_set)
+        self.train_transitions_proba(y)
         print(" Done.")
         print("Training observations probabilities given states...", end="")
-        self.train_observations_proba(train_set)
+        self.train_observations_proba(X, y)
         print(" Done.")
 
 
-    def train_initstate_proba(self, train_set):
+    def train_initstate_proba(self, y):
         """
-        Estimate initial states probabilities from train_set.
+        Estimate initial states probabilities from states sequences.
+        :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
-        states_counts = Counter([token[1] for sequence in train_set for token in sequence])
+        states_counts = Counter([state for state_seq in y for state in state_seq])
         total_counts = np.sum(list(states_counts.values()))
         for state in self.omega_Y:
             self.initial_state_proba[self.Y_index[state]] = states_counts[state] / total_counts
 
 
-    def train_observations_proba(self, train_set):
+    def train_observations_proba(self, X, y):
         """
         Estimate observations probabilities given states, P(X|Y).
+        :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
         # reset observation matrix
         self.observation_proba = np.zeros((self.n_states, self.n_observations), float)
 
         # get counts
-        for sequence in train_set:
-            for obs, state in sequence:
+        for obs_seq, states_seq in zip(X, y):
+            for obs, state in zip(obs_seq, states_seq):
                 # check if observation is known
                 if obs not in self.X_index.keys():
                     obs = UNK
@@ -136,30 +137,30 @@ class HMM:
         self.observation_proba /= np.atleast_2d(np.sum(self.observation_proba, axis=1)).T
 
 
-    def train_transitions_proba(self, train_set):
+    def train_transitions_proba(self, y):
         """
         Estimate transitions probabilities given states, P(Y(t)|Y(t-1))
+        :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
         # reset transition matrix
         self.transition_proba = np.zeros((self.n_states, self.n_states), float)
 
         # get counts
-        for sequence in train_set:
-            for i_token in range(len(sequence)-1):
-                old_state = sequence[i_token][1]
-                new_state = sequence[i_token+1][1]
-                self.transition_proba[self.Y_index[old_state], self.Y_index[new_state]] += 1
+        for state_seq in y:
+            for i_state in range(len(state_seq)-1):
+                prev_state = state_seq[i_state]
+                curr_state = state_seq[i_state+1]
+                self.transition_proba[self.Y_index[prev_state], self.Y_index[curr_state]] += 1
 
         # normalize observation proba (normalize each line to 1)
         self.transition_proba /= np.atleast_2d(np.sum(self.transition_proba, axis=1)).T
 
 
-    def viterbi_forward(self, observations_sequence):
+    def viterbi(self, observations_sequence):
         """
         Predict the most probable sequence of states from a sequence of observations using Viterbi algorithm.
-        :param obs_seq: [array (n_obs,)] sequence of real observations along time
-        :return: states_seq: most probable sequence of states given real observations
-        (:return: p_states_seq: probability of the returned most probable states sequence)
+        :param observations_sequence: sequence of observations. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :return: states_sequence: most probable sequence of states given real observations. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
         # ---- CONVERSION OF SEQUENCE WITH INDEXES
 
@@ -200,33 +201,34 @@ class HMM:
         for i_state in states_seq:
             states_sequence.append(self.omega_Y[int(i_state)])
 
-        return states_sequence #, states_sequence_proba
+        return states_sequence
 
 
     def predict(self, observations_sequences):
         """
         Predict the sequences of states from sequences of observations.
-        :param observations_sequences: list of list of observations
-        :return states_sequences: list of list of predicted states
+        :param observations_sequences: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :return states_sequences: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
         states_sequences = []
         for obs_seq in observations_sequences:
-            states_sequences.append(self.viterbi_forward(obs_seq))
+            states_sequences.append(self.viterbi(obs_seq))
         return states_sequences
 
 
-    def score(self, test_set, ignore_unk=True):
+    def score(self, X, y, ignore_unk=True):
         """
-        Run predictions on each observation sequence of the test set and return precision score.
+        Run predictions on each observation sequence of the dataset and return accuracy score.
+        :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        :return: accuracy_tokens, accuracy_sequences: accuracy rates of predictions at tokens or sequences levels
         """
         true_predictions = 0
         total_predictions = 0
         true_sequences = 0
-        for sequence in test_set:
+        for obs_seq, states_seq in zip(X, y):
             # run prediction
-            obs_seq = [token[0] for token in sequence]
-            states_seq = [token[1] for token in sequence]
-            pred_states_seq = self.viterbi_forward(obs_seq)
+            pred_states_seq = self.viterbi(obs_seq)
 
             # if UNK are ignored, remove their predictions
             if ignore_unk:
@@ -239,6 +241,6 @@ class HMM:
             true_sequences += (states_seq == pred_states_seq)
 
         accuracy_tokens = true_predictions / total_predictions
-        accuracy_sequences = true_sequences / len(test_set)
+        accuracy_sequences = true_sequences / len(y)
 
         return accuracy_tokens, accuracy_sequences

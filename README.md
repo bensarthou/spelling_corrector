@@ -7,6 +7,8 @@
 - smoothing for proba estimations
 - 2nd order observations
 - add initial states for state 0 and 1
+- correct init proba estimation
+- add unsupervised HMM training
 
 [HOHMM implementation](https://github.com/jacobkrantz/Simple-HOHMM/blob/master/)
 
