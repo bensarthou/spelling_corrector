@@ -109,7 +109,7 @@ class HMM:
         Estimate initial states probabilities from states sequences.
         :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
-        states_counts = Counter([state for state_seq in y for state in state_seq])
+        states_counts = Counter([state_seq[0] for state_seq in y])
         total_counts = np.sum(list(states_counts.values()))
         for state in self.omega_Y:
             self.initial_state_proba[self.Y_index[state]] = states_counts[state] / total_counts

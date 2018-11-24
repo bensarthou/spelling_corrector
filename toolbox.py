@@ -1,7 +1,7 @@
 import random
 import numpy as np
 import pickle
-from HMM import HMM, get_states_observations
+from HMM import HMM, get_observations_states
 
 def load_db(dir="data", error_rate=10):
 
