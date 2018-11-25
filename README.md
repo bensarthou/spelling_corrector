@@ -3,7 +3,6 @@
 ## Exploration of HMM algorithms
 
 - forward-backward
-- 2nd order HMM
 - smoothing for proba estimations
 - 2nd order observations
 - add initial states for state 0 and 1

@@ -296,7 +296,7 @@ class HMM2:
         self._make_indexes()
 
 
-    def fit(self, X, y):
+    def fit(self, X, y, smoothing=False):
         """
         Estimate HMM parameters (initial, transition and emisson matrices) from a training data set.
         :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
@@ -306,7 +306,7 @@ class HMM2:
         self.train_initstate_proba(y)
         print(" Done.")
         print("Training transitions probabilities given states...", end="")
-        self.train_transitions_proba(y)
+        self.train_transitions_proba(y, smoothing=smoothing)
         print(" Done.")
         print("Training observations probabilities given states...", end="")
         self.train_observations_proba(X, y)
@@ -388,32 +388,65 @@ class HMM2:
         self.observation_proba /= np.atleast_2d(np.sum(self.observation_proba, axis=1)).T
 
 
-    def train_transitions_proba(self, y):
+    def train_transitions_proba(self, y, smoothing=True):
         """
         Estimate transitions probabilities given states, P(Y(t)|Y(t-1), Y(t-2))
         :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
+        # matrices of counts of apparition of unigrams, bigrams and trigrams
+        counts_1 = np.zeros((self.n_states,), int)
+        counts_2 = np.zeros((self.n_states, self.n_states), int)
+        counts_3 = np.zeros((self.n_states, self.n_states, self.n_states), int)
 
-        # reset transition matrix
-        self.transition1_proba = np.zeros((self.n_states, self.n_states), float)
-        self.transition2_proba = np.ones((self.n_states, self.n_states, self.n_states), float) / self.n_states
+        # get counts of unigrams
+        for state_seq in y:
+            for curr_state in state_seq:
+                counts_1[self.Y_index[curr_state]] += 1
 
-        # get counts for 1st order transitions
+        # get counts of bigrams
         for state_seq in y:
             for i_state in range(len(state_seq)-1):
                 prev_state = state_seq[i_state]
                 curr_state = state_seq[i_state+1]
-                self.transition1_proba[self.Y_index[prev_state], self.Y_index[curr_state]] += 1
+                counts_2[self.Y_index[prev_state], self.Y_index[curr_state]] += 1
 
-        # get counts for 2nd order transitions
+        # get counts of trigrams
         for state_seq in y:
             for i_state in range(len(state_seq)-2):
                 prev_prev_state = state_seq[i_state]
                 prev_state = state_seq[i_state+1]
                 curr_state = state_seq[i_state+2]
-                self.transition2_proba[self.Y_index[prev_prev_state], self.Y_index[prev_state], self.Y_index[curr_state]] += 1
+                counts_3[self.Y_index[prev_prev_state], self.Y_index[prev_state], self.Y_index[curr_state]] += 1
 
-        # normalize observation proba (normalize each line to 1)
+        # reset transition matrix
+        self.transition1_proba = np.zeros((self.n_states, self.n_states), float)
+        self.transition2_proba = np.zeros((self.n_states, self.n_states, self.n_states), float)
+
+        # fill transitions matrices
+        epsilon = 1. / self.n_states
+        self.transition1_proba = counts_2.astype(float)
+        if not smoothing:
+            self.transition2_proba = counts_3.astype(float) + epsilon
+        else:
+            # from http://www.aclweb.org/anthology/P99-1023
+            # sk = state(t),  sj = state(t-1),  si = state(t-2)
+            n_total = np.sum(counts_1)
+            for sk in range(self.n_states):
+                n_sk = counts_1[sk]
+                for sj in range(self.n_states):
+                    n_sj = counts_1[sj] + epsilon
+                    n_sj_sk = counts_2[sj, sk]
+                    for si in range(self.n_states):
+                        n_si_sj = counts_2[si, sj] + epsilon
+                        n_si_sj_sk = counts_3[si, sj, sk]
+                        k2 = (np.log(n_sj_sk + 1) + 1) / (np.log(n_sj_sk + 1) + 2)
+                        k3 = (np.log(n_si_sj_sk + 1) + 1) / (np.log(n_si_sj_sk + 1) + 2)
+                        proba = (k3 * n_si_sj_sk / n_si_sj +
+                                 k2 * (1 - k3) * n_sj_sk / n_sj +
+                                 (1 - k2) * (1 - k3) * n_sk / n_total)
+                        self.transition2_proba[si, sj, sk] = proba
+
+        # normalize transitions proba (normalize each line to 1)
         self.transition1_proba /= np.atleast_2d(np.sum(self.transition1_proba, axis=1)).T
         self.transition2_proba /= np.atleast_3d(np.sum(self.transition2_proba, axis=2))
 
@@ -435,32 +468,31 @@ class HMM2:
 
         # if obs_seq contains only a single observation
         if n_time == 1:
-            states_seq = [np.argmax(prob0)]
+            return self._convert_states_sequence_to_string([np.argmax(prob0)])
 
         # else, if we have several observations (general case)
-        else:
-            # init variables
-            prob_table = np.zeros((self.n_states, self.n_states, n_time))
-            path_table = np.zeros((self.n_states, self.n_states, n_time))
+        # init variables
+        prob_table = np.zeros((self.n_states, self.n_states, n_time))
+        path_table = np.zeros((self.n_states, self.n_states, n_time))
 
-            # at time t=1
+        # at time t=1
+        for i_state in range(self.n_states):
+            for j_state in range(self.n_states):
+                prob_table[i_state, j_state, 1] = prob0[i_state] * self.transition1_proba[i_state, j_state] * self.observation_proba[j_state, obs_seq[1]]
+
+        # loop for each observation, 2 <= t <= n_time
+        for t in range(2, n_time):
             for i_state in range(self.n_states):
                 for j_state in range(self.n_states):
-                    prob_table[i_state, j_state, 1] = prob0[i_state] * self.transition1_proba[i_state, j_state] * self.observation_proba[j_state, obs_seq[1]]
+                    p_state_given_prev_states_and_obs = prob_table[:, i_state, t-1] * self.transition2_proba[:, i_state, j_state] * self.observation_proba[j_state, obs_seq[t]]
+                    prob_table[i_state, j_state, t] = np.max(p_state_given_prev_states_and_obs)
+                    path_table[i_state, j_state, t] = np.argmax(p_state_given_prev_states_and_obs)
 
-            # loop for each observation, 2 <= t <= n_time
-            for t in range(2, n_time):
-                for i_state in range(self.n_states):
-                    for j_state in range(self.n_states):
-                        p_state_given_prev_states_and_obs = prob_table[:, i_state, t-1] * self.transition2_proba[:, i_state, j_state] * self.observation_proba[j_state, obs_seq[t]]
-                        prob_table[i_state, j_state, t] = np.max(p_state_given_prev_states_and_obs)
-                        path_table[i_state, j_state, t] = np.argmax(p_state_given_prev_states_and_obs)
-
-            # back-tracking of optimal states sequence
-            states_seq = np.zeros((n_time,), int)
-            states_seq[-2], states_seq[-1] = np.unravel_index(np.argmax(prob_table[:, :, -1]), prob_table[:, :, -1].shape)
-            for t in reversed(range(2, n_time)):
-                states_seq[t-2] = path_table[states_seq[t-1], states_seq[t], t]
+        # back-tracking of optimal states sequence
+        states_seq = np.zeros((n_time,), int)
+        states_seq[-2], states_seq[-1] = np.unravel_index(np.argmax(prob_table[:, :, -1]), prob_table[:, :, -1].shape)
+        for t in reversed(range(2, n_time)):
+            states_seq[t-2] = path_table[states_seq[t-1], states_seq[t], t]
 
         # ----- CONVERSION OF INDEXES TO REAL STATES
         states_sequence = self._convert_states_sequence_to_string(states_seq)
