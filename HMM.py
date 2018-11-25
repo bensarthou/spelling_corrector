@@ -71,20 +71,7 @@ class HMM:
         # Since everything will be stored in numpy arrays, it is more convenient and compact to
         # handle words and tags as indices (integer) for a direct access. However, we also need
         # to keep the mapping between strings (word or tag) and indices.
-        self.make_indexes()
-
-
-    def make_indexes(self):
-        """
-        Creates the reverse table that maps states/observations names
-        to their index in the probabilities arrays
-        """
-        self.Y_index = {}
-        for i in range(self.n_states):
-            self.Y_index[self.omega_Y[i]] = i
-        self.X_index = {}
-        for i in range(self.n_observations):
-            self.X_index[self.omega_X[i]] = i
+        self._make_indexes()
 
 
     def fit(self, X, y):
@@ -163,44 +150,115 @@ class HMM:
         :return: states_sequence: most probable sequence of states given real observations. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
         # ---- CONVERSION OF SEQUENCE WITH INDEXES
-
-        obs_seq = []
-        for obs in observations_sequence:
-            if obs not in self.X_index.keys():
-                obs = UNK
-            obs_seq.append(self.X_index[obs])
+        obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
 
         # ----- VITERBI
 
         # init variables
-        n_obs = len(obs_seq)
-        prob_table = np.zeros((self.n_states, n_obs))
-        path_table = np.zeros((self.n_states, n_obs))
+        n_time = len(obs_seq)
+        prob_table = np.zeros((self.n_states, n_time))
+        path_table = np.zeros((self.n_states, n_time))
 
         # initial state
         prob_table[:, 0] = self.observation_proba[:, obs_seq[0]] * self.initial_state_proba
-        path_table[:, 0] = 0
 
         # loop for each observation
-        for k in range(1, n_obs):
+        for t in range(1, n_time):
             for i_state in range(self.n_states):
-                p_state_given_prev_state_and_obs = prob_table[:, k-1] * self.transition_proba[:, i_state] * self.observation_proba[i_state, int(obs_seq[k])]
-                prob_table[i_state, k] = np.max(p_state_given_prev_state_and_obs)
-                path_table[i_state, k] = np.argmax(p_state_given_prev_state_and_obs)
+                p_state_given_prev_state_and_obs = prob_table[:, t-1] * self.transition_proba[:, i_state] * self.observation_proba[i_state, obs_seq[t]]
+                prob_table[i_state, t] = np.max(p_state_given_prev_state_and_obs)
+                path_table[i_state, t] = np.argmax(p_state_given_prev_state_and_obs)
 
         # back-tracking of optimal states sequence
-        states_seq = np.zeros((n_obs,))
+        states_seq = np.zeros((n_time,), int)
         states_seq[-1] = np.argmax(prob_table[:, -1])
-        states_sequence_proba = np.max(prob_table[:, -1])
-        for k in range(n_obs-1, 0, -1):
-            states_seq[k-1] = path_table[int(states_seq[k]), k]
+        for t in reversed(range(1, n_time)):
+            states_seq[t-1] = path_table[states_seq[t], t]
 
         # ----- CONVERSION OF INDEXES TO REAL STATES
+        states_sequence = self._convert_states_sequence_to_string(states_seq)
 
+        return states_sequence
+
+
+    def predict(self, observations_sequences):
+        """
+        Predict the sequences of states from sequences of observations.
+        :param observations_sequences: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :return states_sequences: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        """
+        states_sequences = []
+        for obs_seq in observations_sequences:
+            states_sequences.append(self.viterbi(obs_seq))
+        return states_sequences
+
+
+    def score(self, X, y, ignore_unk=True):
+        """
+        Run predictions on each observation sequence of the dataset and return accuracy score.
+        :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        :return: accuracy_tokens, accuracy_sequences: accuracy rates of predictions at tokens or sequences levels
+        """
+        true_predictions = 0
+        total_predictions = 0
+        true_sequences = 0
+        for obs_seq, states_seq in zip(X, y):
+            # run prediction
+            pred_states_seq = self.viterbi(obs_seq)
+
+            # if UNK are ignored, remove their predictions
+            if ignore_unk:
+                states_seq      = [states_seq[t]      for t in range(len(obs_seq)) if obs_seq[t] in self.X_index.keys()]
+                pred_states_seq = [pred_states_seq[t] for t in range(len(obs_seq)) if obs_seq[t] in self.X_index.keys()]
+
+            # check prediction
+            true_predictions += np.sum([states_seq[t] == pred_states_seq[t] for t in range(len(states_seq))])
+            total_predictions += len(states_seq)
+            true_sequences += (states_seq == pred_states_seq)
+
+        accuracy_tokens = true_predictions / total_predictions
+        accuracy_sequences = true_sequences / len(y)
+
+        return accuracy_tokens, accuracy_sequences
+
+
+    def _make_indexes(self):
+        """
+        Creates the reverse table that maps states/observations names
+        to their index in the probabilities arrays
+        """
+        self.Y_index = {}
+        for i in range(self.n_states):
+            self.Y_index[self.omega_Y[i]] = i
+        self.X_index = {}
+        for i in range(self.n_observations):
+            self.X_index[self.omega_X[i]] = i
+
+
+    def _convert_observations_sequence_to_index(self, observations_sequence):
+        """
+        Convert sequence of observations to sequence of numerical index
+        :param observations_sequence: sequence of observations. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :return: obs_seq: numerical encoded observations sequence Ex: [[1, 2, 3], [1, 2]]
+        """
+        obs_seq = []
+        for obs in observations_sequence:
+            if obs not in self.X_index.keys():
+                obs = UNK
+            obs_seq.append(int(self.X_index[obs]))
+        return obs_seq
+
+
+    def _convert_states_sequence_to_string(self, states_seq):
+        """
+        Convert numerical sequence of states to sequence of strings
+        :param states_seq: numerical encoded states sequence. Ex: [[1, 2, 3], [1, 2]]
+        :return: states_sequence: numerical encoded observations sequence. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        """
         states_sequence = []
         for i_state in states_seq:
             states_sequence.append(self.omega_Y[int(i_state)])
-
         return states_sequence
 
 
