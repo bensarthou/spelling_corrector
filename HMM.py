@@ -20,7 +20,7 @@ def get_observations_states(X, y, min_observation_count=0):
     states = sorted(list({state for state_seq in y for state in state_seq}))
 
     # OBSERVATIONS
-    observations = sorted(list({obs for obs_seq in y for obs in obs_seq}))
+    observations = sorted(list({obs for obs_seq in X for obs in obs_seq}))
 
     if min_observation_count > 0:
         obs_counts = Counter([token[0] for sequence in data for token in sequence])
