@@ -54,9 +54,9 @@ class HMM:
             print(" * {} observations".format(self.n_observations))
 
         # Init. of the 3 distributions : observation, transition and initial states
-        self.transition_proba = np.zeros( (self.n_states, self.n_states), float)
-        self.observation_proba = np.zeros( (self.n_states, self.n_observations), float)
-        self.initial_state_proba = np.zeros( (self.n_states,), float )
+        self.transition_proba = np.zeros( (self.n_states, self.n_states), np.float32)
+        self.observation_proba = np.zeros( (self.n_states, self.n_observations), np.float32)
+        self.initial_state_proba = np.zeros( (self.n_states,), np.float32)
 
         # Since everything will be stored in numpy arrays, it is more convenient and compact to
         # handle words and tags as indices (integer) for a direct access. However, we also need
@@ -103,7 +103,7 @@ class HMM:
         """
         # reset observation matrix
         epsilon = 1. / self.n_observations
-        self.observation_proba = np.zeros((self.n_states, self.n_observations)) + epsilon
+        self.observation_proba = np.zeros((self.n_states, self.n_observations), np.float32) + epsilon
 
         # get counts
         for obs_seq, states_seq in zip(X, y):
@@ -125,7 +125,7 @@ class HMM:
         """
         # reset transition matrix
         epsilon = 1. / self.n_states
-        self.transition_proba = np.zeros((self.n_states, self.n_states)) + epsilon
+        self.transition_proba = np.zeros((self.n_states, self.n_states), np.float32) + epsilon
 
         # get counts
         for state_seq in y:
@@ -151,8 +151,8 @@ class HMM:
 
         # init variables
         n_time = len(obs_seq)
-        prob_table = np.zeros((self.n_states, n_time))
-        path_table = np.zeros((self.n_states, n_time))
+        prob_table = np.zeros((self.n_states, n_time), np.float32)
+        path_table = np.zeros((self.n_states, n_time), np.uint16)
 
         # initial state
         prob_table[:, 0] = self.observation_proba[:, obs_seq[0]] * self.initial_state_proba
@@ -281,10 +281,10 @@ class HMM2(HMM):
             print(" * {} observations".format(self.n_observations))
 
         # Init. of the 3 distributions : observation, transition and initial states
-        self.initial_state_proba = np.zeros( (self.n_states,), float)
-        self.transition1_proba = np.zeros( (self.n_states, self.n_states), float)
-        self.transition2_proba = np.zeros( (self.n_states, self.n_states, self.n_states), float)
-        self.observation_proba = np.zeros( (self.n_states, self.n_observations), float)
+        self.initial_state_proba = np.zeros((self.n_states,), np.float32)
+        self.transition1_proba = np.zeros((self.n_states, self.n_states), np.float32)
+        self.transition2_proba = np.zeros((self.n_states, self.n_states, self.n_states), np.float32)
+        self.observation_proba = np.zeros((self.n_states, self.n_observations), np.float32)
 
         # Since everything will be stored in numpy arrays, it is more convenient and compact to
         # handle words and tags as indices (integer) for a direct access. However, we also need
@@ -317,9 +317,9 @@ class HMM2(HMM):
         :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
         # matrices of counts of apparition of unigrams, bigrams and trigrams
-        counts_1 = np.zeros((self.n_states,), int)
-        counts_2 = np.zeros((self.n_states, self.n_states), int)
-        counts_3 = np.zeros((self.n_states, self.n_states, self.n_states), int)
+        counts_1 = np.zeros((self.n_states,), np.uint64)
+        counts_2 = np.zeros((self.n_states, self.n_states), np.uint32)
+        counts_3 = np.zeros((self.n_states, self.n_states, self.n_states), np.uint16)
 
         # get counts of unigrams
         for state_seq in y:
@@ -342,14 +342,14 @@ class HMM2(HMM):
                 counts_3[self.Y_index[prev_prev_state], self.Y_index[prev_state], self.Y_index[curr_state]] += 1
 
         # reset transition matrix
-        self.transition1_proba = np.zeros((self.n_states, self.n_states), float)
-        self.transition2_proba = np.zeros((self.n_states, self.n_states, self.n_states), float)
+        self.transition1_proba = np.zeros((self.n_states, self.n_states), np.float32)
+        self.transition2_proba = np.zeros((self.n_states, self.n_states, self.n_states), np.float32)
 
         # fill transitions matrices
         epsilon = 1. / self.n_states
-        self.transition1_proba = counts_2 + epsilon
+        self.transition1_proba = (counts_2 + epsilon).astype(np.float32)
         if not smoothing:
-            self.transition2_proba = counts_3 + epsilon
+            self.transition2_proba = (counts_3 + epsilon).astype(np.float32)
         else:
             # from http://www.aclweb.org/anthology/P99-1023
             # sk = state(t),  sj = state(t-1),  si = state(t-2)
@@ -394,8 +394,8 @@ class HMM2(HMM):
             return self._convert_states_sequence_to_string([np.argmax(prob0)])
 
         # else, init variables if we have several observations (general case)
-        prob_table = np.zeros((self.n_states, self.n_states, n_time))
-        path_table = np.zeros((self.n_states, self.n_states, n_time))
+        prob_table = np.zeros((self.n_states, self.n_states, n_time), np.float32)
+        path_table = np.zeros((self.n_states, self.n_states, n_time), np.uint16)
 
         # at time t=1
         prob_table[:, :, 1] = prob0[:, np.newaxis] * self.transition1_proba * self.observation_proba[:, obs_seq[1]]

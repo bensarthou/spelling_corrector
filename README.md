@@ -2,10 +2,8 @@
 
 ## Exploration of HMM algorithms
 
-- forward-backward
+- use log-probabilities
 - smoothing for proba estimations
-- 2nd order observations
-- add initial states for state 0 and 1
 - add unsupervised HMM training
 
 [HOHMM implementation](https://github.com/jacobkrantz/Simple-HOHMM/blob/master/)
