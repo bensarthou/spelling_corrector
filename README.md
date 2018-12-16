@@ -9,6 +9,7 @@
 - add unsupervised HMM training
 
 [HOHMM implementation](https://github.com/jacobkrantz/Simple-HOHMM/blob/master/)
+
 "Extended Viterbi algorithm for second order hidden Markov process"
 
 

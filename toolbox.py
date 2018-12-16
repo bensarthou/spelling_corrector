@@ -3,6 +3,7 @@ import numpy as np
 import pickle
 from HMM import HMM, get_observations_states
 
+
 def load_db(dir="data", error_rate=10):
 
     f_train = open("{}/train{}.pkl".format(dir, error_rate), 'rb')
@@ -129,7 +130,7 @@ def noisy_insertion(X_train, y_train, X_test, y_test, thresh_proba=0.05):
 
     # Compute state space
     states, observations = get_observations_states(X_train, y_train)
-    hmm = HMM(states, observations)
+    hmm = HMM(states, observations, verbose=False)
     hmm.fit(X_train, y_train)
 
     noisy_X_train, noisy_y_train = noisy_insertion_dataset(X_train, y_train, hmm,
@@ -268,26 +269,19 @@ def noisy_omission_dataset(X, y, thresh_proba=0.05):
     return noisy_X, noisy_y
 
 
-def display_correction_stats(hmm, X_test, y_test):
+def display_correction_stats(X_test, y_test, y_test_pred, name="HMM"):
     """
     Given a HMM model and test dataset (observation, state), print accuracy and others statistics
-
-    :param hmm: HMM object, with predict method
     :param X_test: list of list of string, each string being an observation
     :param y_test: list of list of string, each string being a state
-
+    :param y_test_pred: list of list of string, each string being a predicted state by HMM 'name'
     """
-
-
-    # HMM predicted letters
-    y_test_pred = hmm.predict(X_test)
-
     # compute errors stats
     hmm_char_res, hmm_word_res = compute_corrections_stats(X_test, y_test, y_test_pred)
     dummy_char_res, dummy_word_res = compute_corrections_stats(X_test, y_test, X_test)
 
     # display main results
-    print("HMM score on test set")
+    print("{} score on test set".format(name))
     print(" * accuracy on full words : {:.2f}%".format(hmm_word_res['accuracy'] * 100))
     print(" * accuracy on letters    : {:.2f}%".format(hmm_char_res['accuracy'] * 100))
     print("   > typos corrected      : {} ({:.2f}%)".format(hmm_char_res['typo_correction'],
