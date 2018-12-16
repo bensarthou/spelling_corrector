@@ -88,10 +88,11 @@ class HMM:
         Estimate initial states probabilities from states sequences.
         :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
+        epsilon = 1. / self.n_states
         states_counts = Counter([state_seq[0] for state_seq in y])
-        total_counts = np.sum(list(states_counts.values()))
         for state in self.omega_Y:
-            self.initial_state_proba[self.Y_index[state]] = states_counts[state] / total_counts
+            self.initial_state_proba[self.Y_index[state]] = epsilon + states_counts[state]
+        self.initial_state_proba /= np.sum(self.initial_state_proba)
 
 
     def train_observations_proba(self, X, y):
@@ -101,7 +102,8 @@ class HMM:
         :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
         # reset observation matrix
-        self.observation_proba = np.zeros((self.n_states, self.n_observations), float)
+        epsilon = 1. / self.n_observations
+        self.observation_proba = np.zeros((self.n_states, self.n_observations)) + epsilon
 
         # get counts
         for obs_seq, states_seq in zip(X, y):
@@ -122,7 +124,8 @@ class HMM:
         :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         """
         # reset transition matrix
-        self.transition_proba = np.zeros((self.n_states, self.n_states), float)
+        epsilon = 1. / self.n_states
+        self.transition_proba = np.zeros((self.n_states, self.n_states)) + epsilon
 
         # get counts
         for state_seq in y:
@@ -344,9 +347,9 @@ class HMM2(HMM):
 
         # fill transitions matrices
         epsilon = 1. / self.n_states
-        self.transition1_proba = counts_2.astype(float)
+        self.transition1_proba = counts_2 + epsilon
         if not smoothing:
-            self.transition2_proba = counts_3.astype(float) + epsilon
+            self.transition2_proba = counts_3 + epsilon
         else:
             # from http://www.aclweb.org/anthology/P99-1023
             # sk = state(t),  sj = state(t-1),  si = state(t-2)
