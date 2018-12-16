@@ -156,10 +156,9 @@ class HMM:
 
         # loop for each observation
         for t in range(1, n_time):
-            for i_state in range(self.n_states):
-                p_state_given_prev_state_and_obs = prob_table[:, t-1] * self.transition_proba[:, i_state] * self.observation_proba[i_state, obs_seq[t]]
-                prob_table[i_state, t] = np.max(p_state_given_prev_state_and_obs)
-                path_table[i_state, t] = np.argmax(p_state_given_prev_state_and_obs)
+            p_state_given_prev_state_and_obs = prob_table[:, t-1, np.newaxis] * self.transition_proba * self.observation_proba[:, obs_seq[t]]
+            prob_table[:, t] = np.max(p_state_given_prev_state_and_obs, axis=0)
+            path_table[:, t] = np.argmax(p_state_given_prev_state_and_obs, axis=0)
 
         # back-tracking of optimal states sequence
         states_seq = np.zeros((n_time,), int)
@@ -391,23 +390,18 @@ class HMM2(HMM):
         if n_time == 1:
             return self._convert_states_sequence_to_string([np.argmax(prob0)])
 
-        # else, if we have several observations (general case)
-        # init variables
+        # else, init variables if we have several observations (general case)
         prob_table = np.zeros((self.n_states, self.n_states, n_time))
         path_table = np.zeros((self.n_states, self.n_states, n_time))
 
         # at time t=1
-        for i_state in range(self.n_states):
-            for j_state in range(self.n_states):
-                prob_table[i_state, j_state, 1] = prob0[i_state] * self.transition1_proba[i_state, j_state] * self.observation_proba[j_state, obs_seq[1]]
+        prob_table[:, :, 1] = prob0[:, np.newaxis] * self.transition1_proba * self.observation_proba[:, obs_seq[1]]
 
         # loop for each observation, 2 <= t <= n_time
         for t in range(2, n_time):
-            for i_state in range(self.n_states):
-                for j_state in range(self.n_states):
-                    p_state_given_prev_states_and_obs = prob_table[:, i_state, t-1] * self.transition2_proba[:, i_state, j_state] * self.observation_proba[j_state, obs_seq[t]]
-                    prob_table[i_state, j_state, t] = np.max(p_state_given_prev_states_and_obs)
-                    path_table[i_state, j_state, t] = np.argmax(p_state_given_prev_states_and_obs)
+            p_state_given_prev_states_and_obs = prob_table[:, :, t-1, np.newaxis] * self.transition2_proba * self.observation_proba[:, obs_seq[t]]
+            prob_table[:, :, t] = np.max(p_state_given_prev_states_and_obs, axis=0)
+            path_table[:, :, t] = np.argmax(p_state_given_prev_states_and_obs, axis=0)
 
         # back-tracking of optimal states sequence
         states_seq = np.zeros(n_time, int)
