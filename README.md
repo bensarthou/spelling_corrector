@@ -1,10 +1,19 @@
 # Typo corrector using HMM
 
-## Exploration of HMM algorithms
+## Exploration and ameliorations of HMM algorithms
 
-- use log-probabilities
-- smoothing for proba estimations
-- add unsupervised HMM training
+- [x] 2nd order HMM
+- [x] Expand model to noisy characters insertions
+- [x] Expand model to noisy characters deletions
+- [ ] Unsupervised HMM training (EM)
+
+- [x] Initialization of matrices with simple uniform probablility distribution (~ Laplace smoothing)
+- [x] More complex smoothing for HMM2
+- [ ] Better smoothing for proba estimations?
+
+- [x] Acceleration of Viterbi algorithm with numpy broadcasting
+- [x] Change floating point numbers precision in case of large states or observations sets
+- [x] Use log-probabilities
 
 [HOHMM implementation](https://github.com/jacobkrantz/Simple-HOHMM/blob/master/)
 
@@ -21,8 +30,6 @@ b    -> a
 .    -> b
 ```
 Idea: Add an "empty state"
-
-
 
 
 ## Omission of characters

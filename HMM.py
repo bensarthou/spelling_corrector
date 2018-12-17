@@ -36,7 +36,7 @@ def get_observations_states(X, y, min_observation_count=0):
 
 
 class HMM:
-    def __init__(self, state_list, observation_list, verbose = True):
+    def __init__(self, state_list, observation_list, verbose=True):
         """
         Builds a 1st order Hidden Markov Model
         state_list is the list of state symbols [s_0...s_(N-1)]
@@ -283,7 +283,7 @@ class HMM:
 
 
 class HMM2(HMM):
-    def __init__(self, state_list, observation_list, verbose = True):
+    def __init__(self, state_list, observation_list, verbose=True):
         """
         Builds a 2nd order Hidden Markov Model
         state_list is the list of state symbols [s_0...s_(N-1)]
