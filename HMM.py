@@ -5,6 +5,12 @@ from collections import Counter
 # To manage OOVs, all words out the vocabulary are mapped on a special token: UNK defined as follows:
 UNK = "<unk>"
 
+# Maximum matrices sizes for float32 or float64
+# It represents the maximum number of valuesof these types we can store to keep
+# matrices size resaonnable
+F64_MAX_SIZE = 1e6
+F32_MAX_SIZE = 5e6
+
 
 def get_observations_states(X, y, min_observation_count=0):
     """
@@ -35,18 +41,27 @@ class HMM:
         Builds a 1st order Hidden Markov Model
         state_list is the list of state symbols [s_0...s_(N-1)]
         observation_list is the list of observation symbols [o_0...o_(M-1)]
-        transition_proba is the transition probability matrix
-            [a_ij] a_ij = Pr(Y_(t+1)=s_j|Y_t=s_i)
-        observation_proba is the observation probablility matrix
-            [b_ik] b_ik = Pr(X_t=o_k|Y_t=s_i)
-        initial_state_proba is the initial state distribution
-            [pi_i] pi_i = Pr(Y_0=s_i)
+        transition_logproba is the transition (log) probability matrix
+            [a_ij] a_ij = P(Y_(t+1)=s_j|Y_t=s_i)
+        observation_logproba is the observation (log) probablility matrix
+            [b_ik] b_ik = P(X_t=o_k|Y_t=s_i)
+        initial_state_logproba is the initial state (log) distribution
+            [pi_i] pi_i = P(Y_0=s_i)
         """
+        # save states and observations sets
         self.omega_Y = sorted(list(set(state_list)))        # Keep the vocabulary of states
         self.omega_X = sorted(list(set(observation_list)))  # Keep the vocabulary of observations
         self.n_states = len(state_list)               # The number of states
         self.n_observations = len(observation_list)   # The number of observations
         self.verbose = verbose
+
+        # set floating point precision depending on sets sizes
+        if self.n_states**2 > F32_MAX_SIZE or self.n_states * self.n_observations > F32_MAX_SIZE:
+            self.fp_precision = np.float16
+        elif self.n_states**2 > F64_MAX_SIZE or self.n_states * self.n_observations > F64_MAX_SIZE:
+            self.fp_precision = np.float32
+        else:
+            self.fp_precision = np.float64
 
         if self.verbose:
             print("1st order HMM created with: ")
@@ -54,9 +69,9 @@ class HMM:
             print(" * {} observations".format(self.n_observations))
 
         # Init. of the 3 distributions : observation, transition and initial states
-        self.transition_proba = np.zeros( (self.n_states, self.n_states), np.float32)
-        self.observation_proba = np.zeros( (self.n_states, self.n_observations), np.float32)
-        self.initial_state_proba = np.zeros( (self.n_states,), np.float32)
+        self.transition_logproba = np.zeros((self.n_states, self.n_states), self.fp_precision)
+        self.observation_logproba = np.zeros((self.n_states, self.n_observations), self.fp_precision)
+        self.initial_state_logproba = np.zeros((self.n_states,), self.fp_precision)
 
         # Since everything will be stored in numpy arrays, it is more convenient and compact to
         # handle words and tags as indices (integer) for a direct access. However, we also need
@@ -91,8 +106,13 @@ class HMM:
         epsilon = 1. / self.n_states
         states_counts = Counter([state_seq[0] for state_seq in y])
         for state in self.omega_Y:
-            self.initial_state_proba[self.Y_index[state]] = epsilon + states_counts[state]
-        self.initial_state_proba /= np.sum(self.initial_state_proba)
+            self.initial_state_logproba[self.Y_index[state]] = epsilon + states_counts[state]
+
+        # normalize proba distribution to 1
+        self.initial_state_logproba /= np.sum(self.initial_state_logproba)
+
+        # convert to log-probabilities for better precision
+        self.initial_state_logproba = np.log(self.initial_state_logproba)
 
 
     def train_observations_proba(self, X, y):
@@ -103,7 +123,7 @@ class HMM:
         """
         # reset observation matrix
         epsilon = 1. / self.n_observations
-        self.observation_proba = np.zeros((self.n_states, self.n_observations), np.float32) + epsilon
+        self.observation_logproba = np.zeros((self.n_states, self.n_observations), np.float64) + epsilon
 
         # get counts
         for obs_seq, states_seq in zip(X, y):
@@ -112,10 +132,13 @@ class HMM:
                 if obs not in self.X_index.keys():
                     obs = UNK
                 # update counts
-                self.observation_proba[self.Y_index[state], self.X_index[obs]] += 1
+                self.observation_logproba[self.Y_index[state], self.X_index[obs]] += 1
 
         # normalize observation proba (normalize each line to 1)
-        self.observation_proba /= np.atleast_2d(np.sum(self.observation_proba, axis=1)).T
+        self.observation_logproba /= np.atleast_2d(np.sum(self.observation_logproba, axis=1)).T
+
+        # convert to log-probabilities for better precision
+        self.observation_logproba = np.log(self.observation_logproba).astype(self.fp_precision)
 
 
     def train_transitions_proba(self, y):
@@ -125,17 +148,20 @@ class HMM:
         """
         # reset transition matrix
         epsilon = 1. / self.n_states
-        self.transition_proba = np.zeros((self.n_states, self.n_states), np.float32) + epsilon
+        self.transition_logproba = np.zeros((self.n_states, self.n_states), np.float64) + epsilon
 
         # get counts
         for state_seq in y:
             for i_state in range(len(state_seq)-1):
                 prev_state = state_seq[i_state]
                 curr_state = state_seq[i_state+1]
-                self.transition_proba[self.Y_index[prev_state], self.Y_index[curr_state]] += 1
+                self.transition_logproba[self.Y_index[prev_state], self.Y_index[curr_state]] += 1
 
         # normalize observation proba (normalize each line to 1)
-        self.transition_proba /= np.atleast_2d(np.sum(self.transition_proba, axis=1)).T
+        self.transition_logproba /= np.atleast_2d(np.sum(self.transition_logproba, axis=1)).T
+
+        # convert to log-probabilities for better precision
+        self.transition_logproba = np.log(self.transition_logproba).astype(self.fp_precision)
 
 
     def viterbi(self, observations_sequence):
@@ -147,19 +173,19 @@ class HMM:
         # ---- CONVERSION OF SEQUENCE WITH INDEXES
         obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
 
-        # ----- VITERBI
+        # ----- VITERBI (log probabilities)
 
         # init variables
         n_time = len(obs_seq)
-        prob_table = np.zeros((self.n_states, n_time), np.float32)
+        prob_table = np.zeros((self.n_states, n_time), self.fp_precision)
         path_table = np.zeros((self.n_states, n_time), np.uint16)
 
         # initial state
-        prob_table[:, 0] = self.observation_proba[:, obs_seq[0]] * self.initial_state_proba
+        prob_table[:, 0] = self.observation_logproba[:, obs_seq[0]] + self.initial_state_logproba
 
         # loop for each observation
         for t in range(1, n_time):
-            p_state_given_prev_state_and_obs = prob_table[:, t-1, np.newaxis] * self.transition_proba * self.observation_proba[:, obs_seq[t]]
+            p_state_given_prev_state_and_obs = prob_table[:, t-1, np.newaxis] + self.transition_logproba + self.observation_logproba[:, obs_seq[t]]
             prob_table[:, t] = np.max(p_state_given_prev_state_and_obs, axis=0)
             path_table[:, t] = np.argmax(p_state_given_prev_state_and_obs, axis=0)
 
@@ -262,18 +288,27 @@ class HMM2(HMM):
         Builds a 2nd order Hidden Markov Model
         state_list is the list of state symbols [s_0...s_(N-1)]
         observation_list is the list of observation symbols [o_0...o_(M-1)]
-        transition_proba is the transition probability matrix
-            [a_ijk] a_ij = Pr(Y_(t)=s_k|Y_(t-1)=s_j, Y_(t-2)=s_i)
-        observation_proba is the observation probablility matrix
-            [b_so] b_so = Pr(X_t=o_o|Y_t=s_s)
-        initial_state_proba is the initial state distribution
-            [pi_ij] pi_ij = Pr(Y_0=s_i, Y_1=s_j)
+        transition_logproba is the transition (log) probability matrix
+            [a_ijk] a_ij = P(Y_(t)=s_k|Y_(t-1)=s_j, Y_(t-2)=s_i)
+        observation_logproba is the observation (log) probablility matrix
+            [b_so] b_so = P(X_t=o_o|Y_t=s_s)
+        initial_state_logproba is the initial state (log) distribution
+            [pi_ij] pi_ij = P(Y_0=s_i, Y_1=s_j)
         """
+        # save states and observations sets
         self.omega_Y = sorted(list(set(state_list)))        # Keep the vocabulary of states
         self.omega_X = sorted(list(set(observation_list)))  # Keep the vocabulary of observations
         self.n_states = len(state_list)               # The number of states
         self.n_observations = len(observation_list)   # The number of observations
         self.verbose = verbose
+
+        # set floating point precision depending on sets sizes
+        if self.n_states**3 > F32_MAX_SIZE or self.n_states**2 * self.n_observations > F32_MAX_SIZE:
+            self.fp_precision = np.float16
+        elif self.n_states**3 > F64_MAX_SIZE or self.n_states**2 * self.n_observations > F64_MAX_SIZE:
+            self.fp_precision = np.float32
+        else:
+            self.fp_precision = np.float64
 
         if self.verbose:
             print("2nd order HMM created with: ")
@@ -281,10 +316,10 @@ class HMM2(HMM):
             print(" * {} observations".format(self.n_observations))
 
         # Init. of the 3 distributions : observation, transition and initial states
-        self.initial_state_proba = np.zeros((self.n_states,), np.float32)
-        self.transition1_proba = np.zeros((self.n_states, self.n_states), np.float32)
-        self.transition2_proba = np.zeros((self.n_states, self.n_states, self.n_states), np.float32)
-        self.observation_proba = np.zeros((self.n_states, self.n_observations), np.float32)
+        self.initial_state_logproba = np.zeros((self.n_states,), self.fp_precision)
+        self.transition1_logproba = np.zeros((self.n_states, self.n_states), self.fp_precision)
+        self.transition2_logproba = np.zeros((self.n_states, self.n_states, self.n_states), self.fp_precision)
+        self.observation_logproba = np.zeros((self.n_states, self.n_observations), self.fp_precision)
 
         # Since everything will be stored in numpy arrays, it is more convenient and compact to
         # handle words and tags as indices (integer) for a direct access. However, we also need
@@ -342,14 +377,14 @@ class HMM2(HMM):
                 counts_3[self.Y_index[prev_prev_state], self.Y_index[prev_state], self.Y_index[curr_state]] += 1
 
         # reset transition matrix
-        self.transition1_proba = np.zeros((self.n_states, self.n_states), np.float32)
-        self.transition2_proba = np.zeros((self.n_states, self.n_states, self.n_states), np.float32)
+        self.transition1_logproba = np.zeros((self.n_states, self.n_states), self.fp_precision)
+        self.transition2_logproba = np.zeros((self.n_states, self.n_states, self.n_states), self.fp_precision)
 
         # fill transitions matrices
         epsilon = 1. / self.n_states
-        self.transition1_proba = (counts_2 + epsilon).astype(np.float32)
+        self.transition1_logproba = (counts_2 + epsilon).astype(self.fp_precision)
         if not smoothing:
-            self.transition2_proba = (counts_3 + epsilon).astype(np.float32)
+            self.transition2_logproba = (counts_3 + epsilon).astype(self.fp_precision)
         else:
             # from http://www.aclweb.org/anthology/P99-1023
             # sk = state(t),  sj = state(t-1),  si = state(t-2)
@@ -367,11 +402,15 @@ class HMM2(HMM):
                         proba = (k3 * n_si_sj_sk / n_si_sj +
                                  k2 * (1 - k3) * n_sj_sk / n_sj +
                                  (1 - k2) * (1 - k3) * n_sk / n_total)
-                        self.transition2_proba[si, sj, sk] = proba
+                        self.transition2_logproba[si, sj, sk] = proba
 
         # normalize transitions proba (normalize each line to 1)
-        self.transition1_proba /= np.atleast_2d(np.sum(self.transition1_proba, axis=1)).T
-        self.transition2_proba /= np.atleast_3d(np.sum(self.transition2_proba, axis=2))
+        self.transition1_logproba /= np.atleast_2d(np.sum(self.transition1_logproba, axis=1)).T
+        self.transition2_logproba /= np.atleast_3d(np.sum(self.transition2_logproba, axis=2))
+
+        # convert to log-probabilities for better precision
+        self.transition1_logproba = np.log(self.transition1_logproba)
+        self.transition2_logproba = np.log(self.transition2_logproba)
 
 
     def viterbi(self, observations_sequence):
@@ -387,22 +426,22 @@ class HMM2(HMM):
 
         # at time t=0
         n_time = len(obs_seq)
-        prob0 = self.observation_proba[:, obs_seq[0]] * self.initial_state_proba
+        prob0 = self.observation_logproba[:, obs_seq[0]] + self.initial_state_logproba
 
         # if obs_seq contains only a single observation
         if n_time == 1:
             return self._convert_states_sequence_to_string([np.argmax(prob0)])
 
         # else, init variables if we have several observations (general case)
-        prob_table = np.zeros((self.n_states, self.n_states, n_time), np.float32)
+        prob_table = np.zeros((self.n_states, self.n_states, n_time), self.fp_precision)
         path_table = np.zeros((self.n_states, self.n_states, n_time), np.uint16)
 
         # at time t=1
-        prob_table[:, :, 1] = prob0[:, np.newaxis] * self.transition1_proba * self.observation_proba[:, obs_seq[1]]
+        prob_table[:, :, 1] = prob0[:, np.newaxis] + self.transition1_logproba + self.observation_logproba[:, obs_seq[1]]
 
         # loop for each observation, 2 <= t <= n_time
         for t in range(2, n_time):
-            p_state_given_prev_states_and_obs = prob_table[:, :, t-1, np.newaxis] * self.transition2_proba * self.observation_proba[:, obs_seq[t]]
+            p_state_given_prev_states_and_obs = prob_table[:, :, t-1, np.newaxis] + self.transition2_logproba + self.observation_logproba[:, obs_seq[t]]
             prob_table[:, :, t] = np.max(p_state_given_prev_states_and_obs, axis=0)
             path_table[:, :, t] = np.argmax(p_state_given_prev_states_and_obs, axis=0)
 

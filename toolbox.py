@@ -171,10 +171,10 @@ def noisy_insertion_dataset(X, y, hmm, thresh_proba=0.05):
             if r < thresh_proba:
                 # Get the observation distribution depending on the previous letter state
                 prev_letter_idx = hmm.X_index[letter]
-                obs_distribution = hmm.observation_proba[prev_letter_idx, :]
+                obs_distribution = hmm.observation_logproba[prev_letter_idx, :]
 
                 # We draw one observation according to the proba distribution
-                new_observation = np.random.choice(hmm.omega_X, size=1, p=obs_distribution)
+                new_observation = np.random.choice(hmm.omega_X, size=1, p=np.exp(obs_distribution))
 
                 new_word_obs.append(str(list(new_observation)[0]))
                 new_word_state.append('_')
