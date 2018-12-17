@@ -200,6 +200,198 @@ class HMM:
 
         return states_sequence
 
+    def forward(self, observations_sequence, decode=True):
+        """
+        Predict the most probable sequence of states from a sequence of observations using
+          forward algorithm (log probability).
+        :param observations_sequence: sequence of observations.
+                Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :param decode: bool, points out if the observation sequence must be coded with obs indices,
+                        or is already encoded
+        :return alpha: alpha matrix, defined as in https://en.wikipedia.org/wiki/Forward_algorithm.
+                ndarray, n_states*n_time
+        """
+        # ---- CONVERSION OF SEQUENCE WITH INDEXES
+        if decode:
+            obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
+        else:
+            obs_seq = observations_sequence
+
+        # init variables
+        n_time = len(obs_seq)
+        alpha = np.zeros((self.n_states, n_time), self.fp_precision)
+
+        # initial state
+        alpha[:, 0] = self.observation_logproba[:, obs_seq[0]] * self.initial_state_logproba
+
+        # loop for each observation
+        for t in range(1, n_time):
+            p_state_given_prev_state_and_obs = alpha[:, t-1, np.newaxis] *\
+                                               self.transition_logproba *\
+                                               self.observation_logproba[:, obs_seq[t]]
+            alpha[:, t] = np.sum(p_state_given_prev_state_and_obs, axis=0)
+
+        return alpha
+
+    def backward(self, observations_sequence, decode=True):
+        """
+        Predict the most probable sequence of states from a sequence of observations using
+          backward algorithm (log probability).
+        :param observations_sequence: sequence of observations.
+                Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :param decode: bool, points out if the observation sequence must be coded with obs indices,
+                        or is already encoded
+        :return beta: beta matrix, defined as in https://en.wikipedia.org/wiki/Forward%E2%80%93backward_algorithm.
+                ndarray, n_states*n_time
+        """
+        # ---- CONVERSION OF SEQUENCE WITH INDEXES
+        if decode:
+            obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
+        else:
+            obs_seq = observations_sequence
+
+        # init variables
+        n_time = len(obs_seq)
+        beta = np.zeros((self.n_states, n_time), self.fp_precision)
+
+        #Uniform init for final states
+        final_state_logproba = np.ones(self.n_states, 1)/self.n_states
+
+        # final state
+        beta[:, n_time-1] = self.observation_logproba[:, obs_seq[n_time-1]] * final_state_logproba
+
+        # loop for each observation
+        for t in range(n_time - 2, -1, -1):
+            p_state_given_prev_state_and_obs = beta[:, t+1, np.newaxis] *\
+                                               self.transition_logproba *\
+                                               self.observation_logproba[:, obs_seq[t]]
+            beta[:, t] = np.sum(p_state_given_prev_state_and_obs, axis=0)
+
+        return beta
+
+    def _expectation_sequence(self, observations_sequence):
+        """Take a sequence and apply expectation step of the EM algorithm: Compute alpha, beta ,
+           P(obs_seq) and compute associated probabilities
+
+           :param observations_sequence: sequence of observations.
+                   Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+
+            :return proba_seq: probability for the sequence to appear
+            :return init_proba_seq: ndarray (n_states, 1), initial probability of state knowing
+                                    the sequence
+            :return observation_proba_seq (summed over t): ndarray (n_states, n_observations),
+                                                            observation probability knowing the sequence
+            :return transition_proba_seq (summed over t): ndarray (n_states, n_states),
+                                                          transition probability knowing the sequence
+
+            """
+
+        # ---- CONVERSION OF SEQUENCE WITH INDEXES
+        obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
+
+        n_time = len(obs_seq)
+
+        # ---- Forward-backward algorithmes
+        alpha = self.forward(obs_seq, decode=False)
+        beta = self.backward(obs_seq, decode=False)
+
+        # Estimated probability for the sequence: P(x_)
+        proba_seq = np.sum(alpha[:, n_time-1])
+
+        # estimated joint probability of hidden states, and sequence. P(h=i, x_): (n_states, n_time)
+        state_proba_seq = alpha*beta
+
+        # estimated probability of intitial hidden states, knowing the sequence: (n_states, 1)
+        init_proba_seq = state_proba_seq[:, 0]/proba_seq
+
+        # Estimated emission through time, knowning the sequence: P(ht=i, xt=x|x_)
+        observation_proba_seq = np.zeros((self.n_states, self.n_observations, n_time),
+                                         self.fp_precision)
+
+        for t in range(n_time):
+            obs_idx = obs_seq[t]
+            observation_proba_seq[:, obs_idx, t] = state_proba_seq[:, t]/proba_seq
+
+        # Estimated transition through time, knowning the sequence: P(ht=i, xt=x|x_)
+        transition_proba_seq = np.zeros((self.n_states, self.n_states, n_time),
+                                        self.fp_precision)
+
+        for t in range(n_time-1):
+            obs_idx = obs_seq[t]
+            transition_proba_seq[:, :, t] = (alpha[:, t]*\
+                                             self.transition_logproba*\
+                                             self.observation_logproba[:, obs_idx].T*\
+                                             beta[:, t+1].T)/proba_seq
+
+        return proba_seq, init_proba_seq, np.sum(observation_proba_seq, axis=2),\
+               np.sum(transition_proba_seq, axis=2)
+
+
+    def _expectation(self, X):
+        """ Compute counts for a dataset of sequences
+
+            :param X: list of list, observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+
+            :return counts_init_state: ndarray (n_states, 1), expected "counts" of states as
+                                        initial observations
+            :return counts_observation: ndarray (n_states, n_observations), expected counts of
+                                         observations generated by states
+            :return counts_transition: ndarray (n_states, n_states), expected counts of transitions
+                                        between states
+
+        """
+
+        # Expected counts for EM algorithm
+        counts_init_state = np.zeros((self.n_states, 1), self.fp_precision)
+        counts_observation = np.zeros((self.n_states, self.n_observations), self.fp_precision)
+        counts_transition = np.zeros((self.n_states, self.n_states), self.fp_precision)
+
+        for seq in X:
+            proba_seq, init_proba_seq, obs_proba_seq, trans_proba_seq = self._expectation_sequence(seq)
+
+            counts_init_state += init_proba_seq
+            counts_transition += trans_proba_seq
+            counts_observation += obs_proba_seq
+
+        return counts_init_state, counts_observation, counts_transition
+
+
+    def _minimization(self, counts_init_state, counts_observation, counts_transition):
+        """ Update transition/observation models according to counts
+
+        :param counts_init_state: ndarray (n_states, 1), expected "counts" of states as
+                                    initial observations
+        :param counts_observation: ndarray (n_states, n_observations), expected counts of
+                                     observations generated by states
+        :param counts_transition: ndarray (n_states, n_states), expected counts of transitions
+                                    between states
+        """
+
+        # Computation of model probability, with eps smoothing
+        counts_init_state += 1./self.n_states
+        self.initial_state_logproba = counts_init_state/ np.sum(counts_init_state)
+        self.transition_logproba = counts_transition / np.atleast_2d(np.sum(counts_transition,
+                                                                            axis=1)).T
+        self.observation_logproba = counts_observation / np.atleast_2d(np.sum(counts_observation,
+                                                                              axis=1)).T
+
+    def EM(self, X):
+        """
+        Execute Expectation/Minimization algorithm on a dataset, to predict a HMM model
+
+        :param X: list of list, observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        """
+        # Uniform Init. of the 3 distributions : observation, transition and initial states
+        self.initial_state_logproba = np.ones((self.n_states,), self.fp_precision)/self.n_states
+        self.observation_logproba = np.ones((self.n_states, self.n_observations),
+                                            self.fp_precision)/self.n_observations
+        self.transition_logproba = np.ones((self.n_states, self.n_states),
+                                           self.fp_precision)/self.n_states
+
+
+
+
+
 
     def predict(self, observations_sequences):
         """
