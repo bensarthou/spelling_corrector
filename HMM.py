@@ -211,6 +211,7 @@ class HMM:
         :return alpha: alpha matrix, defined as in https://en.wikipedia.org/wiki/Forward_algorithm.
                 ndarray, n_states*n_time
         """
+        # print('------ FORWARD')
         # ---- CONVERSION OF SEQUENCE WITH INDEXES
         if decode:
             obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
@@ -244,6 +245,8 @@ class HMM:
         :return beta: beta matrix, defined as in https://en.wikipedia.org/wiki/Forward%E2%80%93backward_algorithm.
                 ndarray, n_states*n_time
         """
+        # print('------ BACKWARD')
+
         # ---- CONVERSION OF SEQUENCE WITH INDEXES
         if decode:
             obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
@@ -255,7 +258,7 @@ class HMM:
         beta = np.zeros((self.n_states, n_time), self.fp_precision)
 
         #Uniform init for final states
-        final_state_logproba = np.ones(self.n_states, 1)/self.n_states
+        final_state_logproba = np.ones((self.n_states, ))/self.n_states
 
         # final state
         beta[:, n_time-1] = self.observation_logproba[:, obs_seq[n_time-1]] * final_state_logproba
@@ -285,7 +288,7 @@ class HMM:
                                                           transition probability knowing the sequence
 
             """
-
+        # print('---- EXPECTATION SEQ')
         # ---- CONVERSION OF SEQUENCE WITH INDEXES
         obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
 
@@ -341,22 +344,22 @@ class HMM:
             :return proba_seq_list: list of probability for each sequence of X
 
         """
-
+        # print('-- EXPECTATION')
         # Expected counts for EM algorithm
-        counts_init_state = np.zeros((self.n_states, 1), self.fp_precision)
+        counts_init_state = np.zeros((self.n_states,), self.fp_precision)
         counts_observation = np.zeros((self.n_states, self.n_observations), self.fp_precision)
         counts_transition = np.zeros((self.n_states, self.n_states), self.fp_precision)
 
         proba_seq_list = np.zeros((len(X), 1))
 
-        for seq in X:
+        for (id_seq, seq) in enumerate(X):
             proba_seq, init_proba_seq, obs_proba_seq, trans_proba_seq = self._expectation_sequence(seq)
 
             counts_init_state += init_proba_seq
             counts_transition += trans_proba_seq
             counts_observation += obs_proba_seq
 
-            proba_seq_list.append(proba_seq)
+            proba_seq_list[id_seq] = proba_seq
 
         return counts_init_state, counts_observation, counts_transition, proba_seq_list
 
@@ -371,7 +374,7 @@ class HMM:
         :param counts_transition: ndarray (n_states, n_states), expected counts of transitions
                                     between states
         """
-
+        # print('-- MINIMIZATION')
         # Computation of model probability, with eps smoothing
         counts_init_state += 1./self.n_states
         self.initial_state_logproba = counts_init_state/ np.sum(counts_init_state)
@@ -393,20 +396,20 @@ class HMM:
         self.transition_logproba = np.ones((self.n_states, self.n_states),
                                            self.fp_precision)/self.n_states
 
-        counts_init_state, counts_observation, counts_transition, proba_seq_list = self._expectation(X)
+        cnt_init_state, cnt_observation, cnt_transition, proba_seq_list = self._expectation(X)
         n_iter = 0
         old_proba_seq_list = [0]*len(X)
         delta = max([abs(old_P - new_P) for (old_P, new_P) in zip(old_proba_seq_list,
                                                                   proba_seq_list)])
 
-        while (delta > epsilon) and (n_iter > max_iter):
-
+        while (delta > epsilon) and (n_iter < max_iter):
+            print('EM LOOP: n_iter=', n_iter)
             # Minimization
-            self._minimization(counts_init_state, counts_observation, counts_transition)
+            self._minimization(cnt_init_state, cnt_observation, cnt_transition)
 
             old_proba_seq_list = proba_seq_list.copy()
 
-            counts_init_state, counts_observation, counts_transition, proba_seq_list = self._expectation(X)
+            cnt_init_state, cnt_observation, cnt_transition, proba_seq_list = self._expectation(X)
 
             delta = max([abs(old_P - new_P) for (old_P, new_P) in zip(old_proba_seq_list,
                                                                       proba_seq_list)])
