@@ -200,6 +200,7 @@ class HMM:
 
         return states_sequence
 
+
     def forward(self, observations_sequence, decode=True):
         """
         Predict the most probable sequence of states from a sequence of observations using
@@ -233,6 +234,7 @@ class HMM:
             alpha[:, t] = np.sum(p_state_given_prev_state_and_obs, axis=0)
 
         return alpha
+
 
     def backward(self, observations_sequence, decode=True):
         """
@@ -271,6 +273,7 @@ class HMM:
             beta[:, t] = np.sum(p_state_given_prev_state_and_obs, axis=0)
 
         return beta
+
 
     def _expectation_sequence(self, observations_sequence):
         """Take a sequence and apply expectation step of the EM algorithm: Compute alpha, beta ,
@@ -344,7 +347,7 @@ class HMM:
             :return proba_seq_list: list of probability for each sequence of X
 
         """
-        # print('-- EXPECTATION')
+        print('-- EXPECTATION')
         # Expected counts for EM algorithm
         counts_init_state = np.zeros((self.n_states,), self.fp_precision)
         counts_observation = np.zeros((self.n_states, self.n_observations), self.fp_precision)
@@ -374,7 +377,7 @@ class HMM:
         :param counts_transition: ndarray (n_states, n_states), expected counts of transitions
                                     between states
         """
-        # print('-- MINIMIZATION')
+        print('-- MINIMIZATION')
         # Computation of model probability, with eps smoothing
         counts_init_state += 1./self.n_states
         self.initial_state_logproba = counts_init_state/ np.sum(counts_init_state)
@@ -396,7 +399,17 @@ class HMM:
         self.transition_logproba = np.ones((self.n_states, self.n_states),
                                            self.fp_precision)/self.n_states
 
+        # # Normal init
+        # self.initial_state_logproba = np.random.rand(self.n_states)
+        # self.initial_state_logproba /= np.sum(self.initial_state_logproba)
+        # self.observation_logproba = np.random.rand(self.n_states, self.n_observations)
+        # self.observation_logproba /= np.atleast_2d(np.sum(self.observation_logproba, axis=1)).T
+        # self.transition_logproba = np.random.rand(self.n_states, self.n_states)
+        # self.transition_logproba /= np.atleast_2d(np.sum(self.transition_logproba, axis=1)).T
+
+
         cnt_init_state, cnt_observation, cnt_transition, proba_seq_list = self._expectation(X)
+
         n_iter = 0
         old_proba_seq_list = [0]*len(X)
         delta = max([abs(old_P - new_P) for (old_P, new_P) in zip(old_proba_seq_list,
