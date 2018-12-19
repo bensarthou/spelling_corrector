@@ -300,7 +300,6 @@ class HMM:
         # ---- Forward-backward algorithmes
         alpha = self.forward(obs_seq, decode=False)
         beta = self.backward(obs_seq, decode=False)
-
         # Estimated probability for the sequence: P(x_)
         proba_seq = np.sum(alpha[:, n_time-1])
 
@@ -357,7 +356,6 @@ class HMM:
 
         for (id_seq, seq) in enumerate(X):
             proba_seq, init_proba_seq, obs_proba_seq, trans_proba_seq = self._expectation_sequence(seq)
-
             counts_init_state += init_proba_seq
             counts_transition += trans_proba_seq
             counts_observation += obs_proba_seq
@@ -392,20 +390,20 @@ class HMM:
 
         :param X: list of list, observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
         """
-        # Uniform Init. of the 3 distributions : observation, transition and initial states
-        self.initial_state_logproba = np.ones((self.n_states,), self.fp_precision)/self.n_states
-        self.observation_logproba = np.ones((self.n_states, self.n_observations),
-                                            self.fp_precision)/self.n_observations
-        self.transition_logproba = np.ones((self.n_states, self.n_states),
-                                           self.fp_precision)/self.n_states
+        # # Uniform Init. of the 3 distributions : observation, transition and initial states
+        # self.initial_state_logproba = np.ones((self.n_states,), self.fp_precision)/self.n_states
+        # self.observation_logproba = np.ones((self.n_states, self.n_observations),
+        #                                     self.fp_precision)/self.n_observations
+        # self.transition_logproba = np.ones((self.n_states, self.n_states),
+        #                                    self.fp_precision)/self.n_states
 
         # # Normal init
-        # self.initial_state_logproba = np.random.rand(self.n_states)
-        # self.initial_state_logproba /= np.sum(self.initial_state_logproba)
-        # self.observation_logproba = np.random.rand(self.n_states, self.n_observations)
-        # self.observation_logproba /= np.atleast_2d(np.sum(self.observation_logproba, axis=1)).T
-        # self.transition_logproba = np.random.rand(self.n_states, self.n_states)
-        # self.transition_logproba /= np.atleast_2d(np.sum(self.transition_logproba, axis=1)).T
+        self.initial_state_logproba = np.random.rand(self.n_states)
+        self.initial_state_logproba /= np.sum(self.initial_state_logproba)
+        self.observation_logproba = np.random.rand(self.n_states, self.n_observations)
+        self.observation_logproba /= np.atleast_2d(np.sum(self.observation_logproba, axis=1)).T
+        self.transition_logproba = np.random.rand(self.n_states, self.n_states)
+        self.transition_logproba /= np.atleast_2d(np.sum(self.transition_logproba, axis=1)).T
 
 
         cnt_init_state, cnt_observation, cnt_transition, proba_seq_list = self._expectation(X)
@@ -428,6 +426,9 @@ class HMM:
                                                                       proba_seq_list)])
             n_iter += 1
 
+        self.initial_state_logproba = np.log(self.initial_state_logproba)
+        self.observation_logproba = np.log(self.observation_logproba)
+        self.transition_logproba = np.log(self.transition_logproba)
 
     def predict(self, observations_sequences):
         """
