@@ -292,7 +292,7 @@ class HMM:
         # update counts
         states_counts = Counter([state_seq[0] for state_seq in y])
         for state in self.omega_Y:
-            self.initial_state_logproba[self.Y_index[state]] = states_counts[state]
+            self.initial_state_logproba[self.Y_index[state]] += states_counts[state]
 
         # normalize proba distribution to 1
         self.initial_state_logproba /= np.sum(self.initial_state_logproba)
@@ -382,6 +382,11 @@ class HMM:
 
             # Expectation step
             cnt_init_state, cnt_observation, cnt_transition, proba_seq_list = self._expectation(X)
+
+            # if input is not valid, do not update and return error
+            if np.isnan(np.sum(cnt_init_state) + np.sum(cnt_observation) + np.sum(cnt_transition)):
+                print("Undeflow has been detected, stopping EM.")
+                break
 
             # Maximization step
             self._maximization(cnt_init_state, cnt_observation, cnt_transition)
