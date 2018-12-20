@@ -68,10 +68,23 @@ class HMM:
             print(" * {} states".format(self.n_states))
             print(" * {} observations".format(self.n_observations))
 
-        # Init. of the 3 distributions : observation, transition and initial states
-        self.transition_logproba = np.zeros((self.n_states, self.n_states), self.fp_precision)
-        self.observation_logproba = np.zeros((self.n_states, self.n_observations), self.fp_precision)
-        self.initial_state_logproba = np.zeros((self.n_states,), self.fp_precision)
+        # Random init around uniform distribution of the 3 distributions : observation, transition and initial states
+        eps_obs = 1. / self.n_observations
+        eps_states = 1. / self.n_states
+        self.initial_state_logproba = np.random.uniform(low=0.5 * eps_states, high=1.5 * eps_states,
+                                                        size=self.n_states).astype(self.fp_precision)
+        self.observation_logproba = np.random.uniform(low=0.5 * eps_obs, high=1.5 * eps_obs,
+                                                      size=(self.n_states, self.n_observations)).astype(self.fp_precision)
+        self.transition_logproba = np.random.uniform(low=0.5 * eps_states, high=1.5 * eps_states,
+                                                     size=(self.n_states, self.n_states)).astype(self.fp_precision)
+        # normalization of distributions
+        self.initial_state_logproba /= np.sum(self.initial_state_logproba)
+        self.observation_logproba /= np.atleast_2d(np.sum(self.observation_logproba, axis=1)).T
+        self.transition_logproba /= np.atleast_2d(np.sum(self.transition_logproba, axis=1)).T
+        # conversion to log-probabilities
+        self.initial_state_logproba = np.log(self.initial_state_logproba)
+        self.observation_logproba = np.log(self.observation_logproba)
+        self.transition_logproba = np.log(self.transition_logproba)
 
         # Since everything will be stored in numpy arrays, it is more convenient and compact to
         # handle words and tags as indices (integer) for a direct access. However, we also need
@@ -269,13 +282,17 @@ class HMM:
         :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
         :param smoothing: {None, 'epsilon'}. None: no smoothing. 'epsilon': ensure matrices have non-null values.
         """
+        # reset initial state probabilities vector
         if smoothing:
             epsilon = 1. / self.n_states
         else:
             epsilon = 0.
+        self.initial_state_logproba = np.zeros((self.n_states,), self.fp_precision) + epsilon
+
+        # update counts
         states_counts = Counter([state_seq[0] for state_seq in y])
         for state in self.omega_Y:
-            self.initial_state_logproba[self.Y_index[state]] = epsilon + states_counts[state]
+            self.initial_state_logproba[self.Y_index[state]] = states_counts[state]
 
         # normalize proba distribution to 1
         self.initial_state_logproba /= np.sum(self.initial_state_logproba)
@@ -344,38 +361,19 @@ class HMM:
 
     def EM(self, X, max_iter=10, tol=0.01):
         """
-        Run Expectation/Minimization algorithm, to train a HMM model without supervision.
+        Run Expectation/Maximization algorithm, to train a HMM model without supervision.
+        Inspired from http://karlstratos.com/notes/em_hmm_formulation.pdf
         :param X: list of list, observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
         :param max_iter: max number of iterations to run for unsupervised training if y is not provided
         :param tol: tolerance threshold for unsupervised training if y is not provided. The smaller, the more precise.
         """
-        # # Uniform Init. of the 3 distributions : observation, transition and initial states
-        # self.initial_state_logproba = np.ones((self.n_states,), self.fp_precision)/self.n_states
-        # self.observation_logproba = np.ones((self.n_states, self.n_observations),
-        #                                     self.fp_precision)/self.n_observations
-        # self.transition_logproba = np.ones((self.n_states, self.n_states),
-        #                                    self.fp_precision)/self.n_states
+        # NOTE: The 3 distributions (observation, transition and initial states) must. have been already initialized
+        # convert to normal probabilities
+        self.initial_state_logproba = np.exp(self.initial_state_logproba)
+        self.observation_logproba = np.exp(self.observation_logproba)
+        self.transition_logproba = np.exp(self.transition_logproba)
 
-        # Random init around uniform distribution
-        eps_obs = 1. / self.n_observations
-        eps_states = 1. / self.n_states
-        self.initial_state_logproba = np.random.uniform(low=0.5 * eps_states, high=1.5 * eps_states,
-                                                        size=self.n_states)
-        self.initial_state_logproba /= np.sum(self.initial_state_logproba)
-        self.observation_logproba = np.random.uniform(low=0.5 * eps_obs, high=1.5 * eps_obs,
-                                                      size=(self.n_states, self.n_observations))
-        self.observation_logproba /= np.atleast_2d(np.sum(self.observation_logproba, axis=1)).T
-        self.transition_logproba = np.random.uniform(low=0.5 * eps_states, high=1.5 * eps_states,
-                                                     size=(self.n_states, self.n_states))
-        self.transition_logproba /= np.atleast_2d(np.sum(self.transition_logproba, axis=1)).T
-
-        # # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        # # horrible hack to check if it improves results
-        # emission0 = np.eye(26) + 0.2 / 26
-        # emission0 /= np.sum(emission0, axis=1)
-        # self.observation_logproba = emission0
-        # # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
+        # other init
         n_iter = 0
         delta = np.inf
         old_proba_seq_list = np.zeros(len(X))
@@ -385,15 +383,15 @@ class HMM:
             # Expectation step
             cnt_init_state, cnt_observation, cnt_transition, proba_seq_list = self._expectation(X)
 
-            # Minimization step
-            self._minimization(cnt_init_state, cnt_observation, cnt_transition)
+            # Maximization step
+            self._maximization(cnt_init_state, cnt_observation, cnt_transition)
 
             # check convergence
             delta = np.max(np.abs(proba_seq_list - old_proba_seq_list))
             n_iter += 1
             old_proba_seq_list = np.array(proba_seq_list.copy())
             if self.verbose:
-                print("EM LOOP: n_iter={}, delta={}".format(n_iter, delta))
+                print("EM LOOP: n_iter={}, delta={:.4f}".format(n_iter, delta))
 
         # convert to log-probabilities
         self.initial_state_logproba = np.log(self.initial_state_logproba)
@@ -417,74 +415,75 @@ class HMM:
         obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
         n_time = len(obs_seq)
 
-        # ---- Forward-backward algorithms
+        # forward-backward algorithms
         alpha = self.forward(obs_seq, decode=False)
         beta = self.backward(obs_seq, decode=False)
         # Estimated probability for the sequence: P(x_)
-        proba_seq = np.sum(alpha[:, n_time - 1])
+        proba_seq = np.sum(alpha[:, -1])
 
         # estimated joint probability of hidden states, and sequence. P(h=i, x_): (n_states, n_time)
         state_proba_seq = alpha * beta
 
-        # estimated probability of intitial hidden states, knowing the sequence: (n_states, 1)
+        # estimated probability of initial hidden states, knowing the sequence. P(h0=i | x_):(n_states,)
         init_proba_seq = state_proba_seq[:, 0] / proba_seq
 
-        # Estimated emission through time, knowning the sequence: P(ht=i, xt=x|x_)
+        # estimated emission through time, knowing the sequence: P(ht=i, xt=x | x_)
         observation_proba_seq = np.zeros((self.n_states, self.n_observations, n_time), self.fp_precision)
-
         for t in range(n_time):
-            obs_idx = obs_seq[t]
-            observation_proba_seq[:, obs_idx, t] = state_proba_seq[:, t] / proba_seq
+            obs = obs_seq[t]
+            observation_proba_seq[:, obs, t] = state_proba_seq[:, t] / proba_seq
 
-        # Estimated transition through time, knowning the sequence: P(ht=i, xt=x|x_)
+        # estimated transition through time, knowing the sequence: P(ht=i, xt=x | x_)
         transition_proba_seq = np.zeros((self.n_states, self.n_states, n_time), self.fp_precision)
-
         for t in range(n_time - 1):
-            obs_idx = obs_seq[t]
-            transition_proba_seq[:, :, t] = (alpha[:, t] *
+            obs = obs_seq[t+1]
+            transition_proba_seq[:, :, t] = (alpha[:, t, np.newaxis] *
                                              self.transition_logproba *
-                                             self.observation_logproba[:, obs_idx].T *
-                                             beta[:, t + 1].T) / proba_seq
+                                             self.observation_logproba[np.newaxis, :, obs] *
+                                             beta[np.newaxis, :, t + 1]) / proba_seq
 
         return proba_seq, init_proba_seq, np.sum(observation_proba_seq, axis=2), np.sum(transition_proba_seq, axis=2)
 
 
     def _expectation(self, X):
         """
-        Compute counts for a dataset of observations sequences
+        Compute pseudo-counts of a dataset of observations sequences
         :param X: list of list, observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
-        :return counts_init_state: ndarray (n_states, 1), expected "counts" of states as initial observations
-        :return counts_observation: ndarray (n_states, n_observations), expected counts of observations
-        :return counts_transition: ndarray (n_states, n_states), expected counts of transitions between states
+        :return counts_init_state: ndarray (n_states, 1), expected pseudo-counts of states as initial observations
+        :return counts_observation: ndarray (n_states, n_observations), expected pseudo-counts of observations
+        :return counts_transition: ndarray (n_states, n_states), expected pseudo-counts of transitions between states
         :return proba_seq_list: list of probability for each sequence of X
         """
-        # Expected counts for EM algorithm
+        # Expected counts for EM algorithm and probability of each sequence
         counts_init_state = np.zeros((self.n_states,), self.fp_precision)
         counts_observation = np.zeros((self.n_states, self.n_observations), self.fp_precision)
         counts_transition = np.zeros((self.n_states, self.n_states), self.fp_precision)
-
         proba_seq_list = np.zeros(len(X))
 
+        # iterate over each observations sequence of the dataset
         for (id_seq, seq) in enumerate(X):
             proba_seq, init_proba_seq, obs_proba_seq, trans_proba_seq = self._expectation_sequence(seq)
             counts_init_state += init_proba_seq
             counts_transition += trans_proba_seq
             counts_observation += obs_proba_seq
-
             proba_seq_list[id_seq] = proba_seq
 
         return counts_init_state, counts_observation, counts_transition, proba_seq_list
 
 
-    def _minimization(self, counts_init_state, counts_observation, counts_transition):
+    def _maximization(self, counts_init_state, counts_observation, counts_transition):
         """
         Update transition/observation models according to counts
-        :param counts_init_state: ndarray (n_states, 1), expected "counts" of states as initial observations
+        :param counts_init_state: ndarray (n_states,), expected counts of states as initial observations
         :param counts_observation: ndarray (n_states, n_observations), expected counts of observations
         :param counts_transition: ndarray (n_states, n_states), expected counts of transitions between states
         """
-        # Computation of model probability, with eps smoothing
+        # Add epsilon to avoid null values
         counts_init_state += 1. / self.n_states
+        counts_transition += 1. / self.n_states
+        counts_observation += 1. / self.n_observations
+
+        # Maximum Likehood Estimator of model probability
         self.initial_state_logproba = counts_init_state / np.sum(counts_init_state)
         self.transition_logproba = counts_transition / np.atleast_2d(np.sum(counts_transition, axis=1)).T
         self.observation_logproba = counts_observation / np.atleast_2d(np.sum(counts_observation, axis=1)).T
@@ -694,4 +693,4 @@ class HMM2(HMM):
 
 
     def EM(self, X, max_iter=10, tol=0.01):
-        raise NotImplementedError
+        raise NotImplementedError("EM algorithm has not been implemented yet for 2nd order HMM")
