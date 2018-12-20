@@ -79,23 +79,39 @@ class HMM:
         self._make_indexes()
 
 
-    def fit(self, X, y):
+    def fit(self, X, y=None, smoothing='epsilon', max_iter=10, tol=0.01):
         """
         Estimate HMM parameters (initial, transition and emisson matrices) from a training data set.
         :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
-        :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']].
+                  If not given, unsupervised training will be done by EM algorithm.
+        :param smoothing: {None, 'epsilon', 'weighted'}.
+                          None: no smoothing applied
+                          'epsilon' : ensure matrices have non-null values.
+                          'weighted' : more complex smoothing scheme introduced for 2nd order HMM for transition matrix
+                                       in http://www.aclweb.org/anthology/P99-1023
+        :param max_iter: max number of iterations to run for unsupervised training if y is not provided
+        :param tol: tolerance threshold for unsupervised training if y is not provided. The smaller, the more precise.
         """
-        if self.verbose:
-            print("Training initial states probabilities...", end="")
-        self.train_initstate_proba(y)
-        if self.verbose:
-            print(" Done.\nTraining transitions probabilities given states...", end="")
-        self.train_transitions_proba(y)
-        if self.verbose:
-            print(" Done.\nTraining observations probabilities given states...", end="")
-        self.train_observations_proba(X, y)
-        if self.verbose:
-            print(" Done.")
+        # supervised training
+        if y is not None:
+            if self.verbose:
+                print("Training initial states probabilities...", end="")
+            self.train_initstate_proba(y, smoothing=smoothing)
+            if self.verbose:
+                print(" Done.\nTraining transitions probabilities given states...", end="")
+            self.train_transitions_proba(y, smoothing=smoothing)
+            if self.verbose:
+                print(" Done.\nTraining observations probabilities given states...", end="")
+            self.train_observations_proba(X, y, smoothing=smoothing)
+            if self.verbose:
+                print(" Done.")
+
+        # unsupervised training
+        else:
+            if self.verbose:
+                print("Unsupervised training by EM algorithm...")
+            self.EM(X, max_iter=max_iter, tol=tol)
 
 
     def predict(self, X):
@@ -247,12 +263,16 @@ class HMM:
 
     # --------------------------  SUPERVISED TRAINING  --------------------------
 
-    def train_initstate_proba(self, y):
+    def train_initstate_proba(self, y, smoothing='epsilon'):
         """
         Estimate initial states probabilities from states sequences.
         :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        :param smoothing: {None, 'epsilon'}. None: no smoothing. 'epsilon': ensure matrices have non-null values.
         """
-        epsilon = 1. / self.n_states
+        if smoothing:
+            epsilon = 1. / self.n_states
+        else:
+            epsilon = 0.
         states_counts = Counter([state_seq[0] for state_seq in y])
         for state in self.omega_Y:
             self.initial_state_logproba[self.Y_index[state]] = epsilon + states_counts[state]
@@ -264,14 +284,18 @@ class HMM:
         self.initial_state_logproba = np.log(self.initial_state_logproba)
 
 
-    def train_observations_proba(self, X, y):
+    def train_observations_proba(self, X, y, smoothing='epsilon'):
         """
         Estimate observations probabilities given states, P(X|Y).
         :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
         :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        :param smoothing: {None, 'epsilon'}. None: no smoothing. 'epsilon': ensure matrices have non-null values.
         """
         # reset observation matrix
-        epsilon = 1. / self.n_observations
+        if smoothing:
+            epsilon = 1. / self.n_observations
+        else:
+            epsilon = 0.
         self.observation_logproba = np.zeros((self.n_states, self.n_observations), np.float64) + epsilon
 
         # get counts
@@ -290,13 +314,17 @@ class HMM:
         self.observation_logproba = np.log(self.observation_logproba).astype(self.fp_precision)
 
 
-    def train_transitions_proba(self, y):
+    def train_transitions_proba(self, y, smoothing='epsilon'):
         """
         Estimate transitions probabilities given states, P(Y(t)|Y(t-1))
         :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        :param smoothing: {None, 'epsilon'}. None: no smoothing. 'epsilon': ensure matrices have non-null values.
         """
         # reset transition matrix
-        epsilon = 1. / self.n_states
+        if smoothing:
+            epsilon = 1. / self.n_states
+        else:
+            epsilon = 0.
         self.transition_logproba = np.zeros((self.n_states, self.n_states), np.float64) + epsilon
 
         # get counts
@@ -314,10 +342,12 @@ class HMM:
 
     # --------------------------  UNSUPERVISED TRAINING  --------------------------
 
-    def EM(self, X, max_iter=10, epsilon=0.01):
+    def EM(self, X, max_iter=10, tol=0.01):
         """
         Run Expectation/Minimization algorithm, to train a HMM model without supervision.
         :param X: list of list, observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :param max_iter: max number of iterations to run for unsupervised training if y is not provided
+        :param tol: tolerance threshold for unsupervised training if y is not provided. The smaller, the more precise.
         """
         # # Uniform Init. of the 3 distributions : observation, transition and initial states
         # self.initial_state_logproba = np.ones((self.n_states,), self.fp_precision)/self.n_states
@@ -350,7 +380,7 @@ class HMM:
         delta = np.inf
         old_proba_seq_list = np.zeros(len(X))
 
-        while (delta > epsilon) and (n_iter < max_iter):
+        while (delta > tol) and (n_iter < max_iter):
 
             # Expectation step
             cnt_init_state, cnt_observation, cnt_transition, proba_seq_list = self._expectation(X)
@@ -545,29 +575,15 @@ class HMM2(HMM):
         self._make_indexes()
 
 
-    def fit(self, X, y, smoothing=False):
-        """
-        Estimate HMM parameters (initial, transition and emisson matrices) from a training data set.
-        :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
-        :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
-        """
-        if self.verbose:
-            print("Training initial states probabilities...", end="")
-        self.train_initstate_proba(y)
-        if self.verbose:
-            print(" Done.\nTraining transitions probabilities given states...", end="")
-        self.train_transitions_proba(y, smoothing=smoothing)
-        if self.verbose:
-            print(" Done.\nTraining observations probabilities given states...", end="")
-        self.train_observations_proba(X, y)
-        if self.verbose:
-            print(" Done.")
-
-
-    def train_transitions_proba(self, y, smoothing=True):
+    def train_transitions_proba(self, y, smoothing='epsilon'):
         """
         Estimate transitions probabilities given states, P(Y(t)|Y(t-1), Y(t-2))
         :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        :param smoothing: {None, 'epsilon', 'weighted'}.
+                  None: no smoothing applied
+                  'epsilon' : ensure matrices have non-null values.
+                  'weighted' : more complex smoothing scheme introduced for 2nd order HMM for transition matrix
+                               in http://www.aclweb.org/anthology/P99-1023
         """
         # matrices of counts of apparition of unigrams, bigrams and trigrams
         counts_1 = np.zeros((self.n_states,), np.uint64)
@@ -599,11 +615,13 @@ class HMM2(HMM):
         self.transition2_logproba = np.zeros((self.n_states, self.n_states, self.n_states), self.fp_precision)
 
         # fill transitions matrices
-        epsilon = 1. / self.n_states
-        self.transition1_logproba = (counts_2 + epsilon).astype(self.fp_precision)
         if not smoothing:
-            self.transition2_logproba = (counts_3 + epsilon).astype(self.fp_precision)
-        else:
+            epsilon = 0.
+        elif smoothing in {'epsilon', 'weighted'}:
+            epsilon = 1. / self.n_states
+        self.transition1_logproba = (counts_2 + epsilon).astype(self.fp_precision)
+        self.transition2_logproba = (counts_3 + epsilon).astype(self.fp_precision)
+        if smoothing == 'weighted':
             # from http://www.aclweb.org/anthology/P99-1023
             # sk = state(t),  sj = state(t-1),  si = state(t-2)
             n_total = np.sum(counts_1)
@@ -673,3 +691,7 @@ class HMM2(HMM):
         states_sequence = self._convert_states_sequence_to_string(states_seq)
 
         return states_sequence
+
+
+    def EM(self, X, max_iter=10, tol=0.01):
+        raise NotImplementedError
