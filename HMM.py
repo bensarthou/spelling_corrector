@@ -98,6 +98,155 @@ class HMM:
             print(" Done.")
 
 
+    def predict(self, X):
+        """
+        Predict the sequences of states from sequences of observations.
+        :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :return y_pred: list of predicted states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        """
+        y_pred = [None] * len(X)
+        for i_seq, obs_seq in enumerate(X):
+            y_pred[i_seq] = self.viterbi(obs_seq)
+        return y_pred
+
+
+    def score(self, X, y, ignore_unk=True):
+        """
+        Run predictions on each observation sequence of the dataset and return accuracy score.
+        :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        :return: accuracy_tokens, accuracy_sequences: accuracy rates of predictions at tokens or sequences levels
+        """
+        true_predictions = 0
+        total_predictions = 0
+        true_sequences = 0
+        for obs_seq, states_seq in zip(X, y):
+            # run prediction
+            pred_states_seq = self.viterbi(obs_seq)
+
+            # if UNK are ignored, remove their predictions
+            if ignore_unk:
+                states_seq = [states_seq[t] for t in range(len(obs_seq)) if obs_seq[t] in self.X_index.keys()]
+                pred_states_seq = [pred_states_seq[t] for t in range(len(obs_seq)) if
+                                   obs_seq[t] in self.X_index.keys()]
+
+            # check prediction
+            true_predictions += np.sum([states_seq[t] == pred_states_seq[t] for t in range(len(states_seq))])
+            total_predictions += len(states_seq)
+            true_sequences += (states_seq == pred_states_seq)
+
+        accuracy_tokens = true_predictions / total_predictions
+        accuracy_sequences = true_sequences / len(y)
+
+        return accuracy_tokens, accuracy_sequences
+
+    # --------------------------  INFERENCE  --------------------------
+
+    def viterbi(self, observations_sequence):
+        """
+        Predict the most probable sequence of states from a sequence of observations using Viterbi algorithm.
+        :param observations_sequence: sequence of observations. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :return: states_sequence: most probable sequence of states given real observations. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        """
+        # ---- CONVERSION OF SEQUENCE WITH INDEXES
+        obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
+
+        # ----- VITERBI (log probabilities)
+
+        # init variables
+        n_time = len(obs_seq)
+        prob_table = np.zeros((self.n_states, n_time), self.fp_precision)
+        path_table = np.zeros((self.n_states, n_time), np.uint16)
+
+        # initial state
+        prob_table[:, 0] = self.observation_logproba[:, obs_seq[0]] + self.initial_state_logproba
+
+        # loop for each observation
+        for t in range(1, n_time):
+            p_state_given_prev_state_and_obs = prob_table[:, t - 1,
+                                               np.newaxis] + self.transition_logproba + self.observation_logproba[:,
+                                                                                        obs_seq[t]]
+            prob_table[:, t] = np.max(p_state_given_prev_state_and_obs, axis=0)
+            path_table[:, t] = np.argmax(p_state_given_prev_state_and_obs, axis=0)
+
+        # back-tracking of optimal states sequence
+        states_seq = np.zeros((n_time,), int)
+        states_seq[-1] = np.argmax(prob_table[:, -1])
+        for t in reversed(range(1, n_time)):
+            states_seq[t - 1] = path_table[states_seq[t], t]
+
+        # ----- CONVERSION OF INDEXES TO REAL STATES
+        states_sequence = self._convert_states_sequence_to_string(states_seq)
+
+        return states_sequence
+
+
+    def forward(self, observations_sequence, decode=True):
+        """
+        Predict (log-)probabilities of sequence of states from a sequence of observations using forward algorithm.
+        :param observations_sequence: sequence of observations. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :param decode: bool, if the observation sequence must be coded with obs indices, or is already encoded
+        :return alpha: alpha matrix, defined as in https://en.wikipedia.org/wiki/Forward_algorithm.
+                ndarray, n_states * n_time
+        """
+        # conversion of sequence with indexes
+        if decode:
+            obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
+        else:
+            obs_seq = observations_sequence
+
+        # init variables
+        n_time = len(obs_seq)
+        alpha = np.zeros((self.n_states, n_time), self.fp_precision)
+
+        # initial state
+        alpha[:, 0] = self.observation_logproba[:, obs_seq[0]] * self.initial_state_logproba
+
+        # loop for each observation
+        for t in range(1, n_time):
+            p_state_given_prev_state_and_obs = alpha[:, t - 1, np.newaxis] * \
+                                               self.transition_logproba * \
+                                               self.observation_logproba[:, obs_seq[t]]
+            alpha[:, t] = np.sum(p_state_given_prev_state_and_obs, axis=0)
+
+        return alpha
+
+
+    def backward(self, observations_sequence, decode=True):
+        """
+        Predict (log-)probabilities of sequence of states from a sequence of observations using backward algorithm.
+        :param observations_sequence: sequence of observations. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
+        :param decode: bool, if the observation sequence must be coded with obs indices, or is already encoded
+        :return beta: beta matrix, defined as in https://en.wikipedia.org/wiki/Forward%E2%80%93backward_algorithm.
+                ndarray, n_states*n_time
+        """
+        # conversion of sequence with indexes
+        if decode:
+            obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
+        else:
+            obs_seq = observations_sequence
+
+        # init variables
+        n_time = len(obs_seq)
+        beta = np.zeros((self.n_states, n_time), self.fp_precision)
+
+        # Uniform init for final states
+        final_state_logproba = np.ones((self.n_states,)) / self.n_states
+
+        # final state
+        beta[:, n_time - 1] = self.observation_logproba[:, obs_seq[n_time - 1]] * final_state_logproba
+
+        # loop for each observation
+        for t in range(n_time - 2, -1, -1):
+            p_state_given_prev_state_and_obs = beta[:, t + 1, np.newaxis] * \
+                                               self.transition_logproba * \
+                                               self.observation_logproba[:, obs_seq[t]]
+            beta[:, t] = np.sum(p_state_given_prev_state_and_obs, axis=0)
+
+        return beta
+
+    # --------------------------  SUPERVISED TRAINING  --------------------------
+
     def train_initstate_proba(self, y):
         """
         Estimate initial states probabilities from states sequences.
@@ -163,107 +312,63 @@ class HMM:
         # convert to log-probabilities for better precision
         self.transition_logproba = np.log(self.transition_logproba).astype(self.fp_precision)
 
+    # --------------------------  UNSUPERVISED TRAINING  --------------------------
 
-    def viterbi(self, observations_sequence):
+    def EM(self, X, max_iter=10, epsilon=0.01):
         """
-        Predict the most probable sequence of states from a sequence of observations using Viterbi algorithm.
-        :param observations_sequence: sequence of observations. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
-        :return: states_sequence: most probable sequence of states given real observations. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
+        Run Expectation/Minimization algorithm, to train a HMM model without supervision.
+        :param X: list of list, observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
         """
-        # ---- CONVERSION OF SEQUENCE WITH INDEXES
-        obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
+        # # Uniform Init. of the 3 distributions : observation, transition and initial states
+        # self.initial_state_logproba = np.ones((self.n_states,), self.fp_precision)/self.n_states
+        # self.observation_logproba = np.ones((self.n_states, self.n_observations),
+        #                                     self.fp_precision)/self.n_observations
+        # self.transition_logproba = np.ones((self.n_states, self.n_states),
+        #                                    self.fp_precision)/self.n_states
 
-        # ----- VITERBI (log probabilities)
+        # Random init around uniform distribution
+        eps_obs = 1. / self.n_observations
+        eps_states = 1. / self.n_states
+        self.initial_state_logproba = np.random.uniform(low=0.5 * eps_states, high=1.5 * eps_states,
+                                                        size=self.n_states)
+        self.initial_state_logproba /= np.sum(self.initial_state_logproba)
+        self.observation_logproba = np.random.uniform(low=0.5 * eps_obs, high=1.5 * eps_obs,
+                                                      size=(self.n_states, self.n_observations))
+        self.observation_logproba /= np.atleast_2d(np.sum(self.observation_logproba, axis=1)).T
+        self.transition_logproba = np.random.uniform(low=0.5 * eps_states, high=1.5 * eps_states,
+                                                     size=(self.n_states, self.n_states))
+        self.transition_logproba /= np.atleast_2d(np.sum(self.transition_logproba, axis=1)).T
 
-        # init variables
-        n_time = len(obs_seq)
-        prob_table = np.zeros((self.n_states, n_time), self.fp_precision)
-        path_table = np.zeros((self.n_states, n_time), np.uint16)
+        # # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        # # horrible hack to check if it improves results
+        # emission0 = np.eye(26) + 0.2 / 26
+        # emission0 /= np.sum(emission0, axis=1)
+        # self.observation_logproba = emission0
+        # # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-        # initial state
-        prob_table[:, 0] = self.observation_logproba[:, obs_seq[0]] + self.initial_state_logproba
+        n_iter = 0
+        delta = np.inf
+        old_proba_seq_list = np.zeros(len(X))
 
-        # loop for each observation
-        for t in range(1, n_time):
-            p_state_given_prev_state_and_obs = prob_table[:, t-1, np.newaxis] + self.transition_logproba + self.observation_logproba[:, obs_seq[t]]
-            prob_table[:, t] = np.max(p_state_given_prev_state_and_obs, axis=0)
-            path_table[:, t] = np.argmax(p_state_given_prev_state_and_obs, axis=0)
+        while (delta > epsilon) and (n_iter < max_iter):
 
-        # back-tracking of optimal states sequence
-        states_seq = np.zeros((n_time,), int)
-        states_seq[-1] = np.argmax(prob_table[:, -1])
-        for t in reversed(range(1, n_time)):
-            states_seq[t-1] = path_table[states_seq[t], t]
+            # Expectation step
+            cnt_init_state, cnt_observation, cnt_transition, proba_seq_list = self._expectation(X)
 
-        # ----- CONVERSION OF INDEXES TO REAL STATES
-        states_sequence = self._convert_states_sequence_to_string(states_seq)
+            # Minimization step
+            self._minimization(cnt_init_state, cnt_observation, cnt_transition)
 
-        return states_sequence
+            # check convergence
+            delta = np.max(np.abs(proba_seq_list - old_proba_seq_list))
+            n_iter += 1
+            old_proba_seq_list = np.array(proba_seq_list.copy())
+            if self.verbose:
+                print("EM LOOP: n_iter={}, delta={}".format(n_iter, delta))
 
-
-    def forward(self, observations_sequence, decode=True):
-        """
-        Predict (log-)probabilities of sequence of states from a sequence of observations using forward algorithm.
-        :param observations_sequence: sequence of observations. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
-        :param decode: bool, if the observation sequence must be coded with obs indices, or is already encoded
-        :return alpha: alpha matrix, defined as in https://en.wikipedia.org/wiki/Forward_algorithm.
-                ndarray, n_states * n_time
-        """
-        # conversion of sequence with indexes
-        if decode:
-            obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
-        else:
-            obs_seq = observations_sequence
-
-        # init variables
-        n_time = len(obs_seq)
-        alpha = np.zeros((self.n_states, n_time), self.fp_precision)
-
-        # initial state
-        alpha[:, 0] = self.observation_logproba[:, obs_seq[0]] * self.initial_state_logproba
-
-        # loop for each observation
-        for t in range(1, n_time):
-            p_state_given_prev_state_and_obs = alpha[:, t-1, np.newaxis] *\
-                                               self.transition_logproba *\
-                                               self.observation_logproba[:, obs_seq[t]]
-            alpha[:, t] = np.sum(p_state_given_prev_state_and_obs, axis=0)
-
-        return alpha
-
-
-    def backward(self, observations_sequence, decode=True):
-        """
-        Predict (log-)probabilities of sequence of states from a sequence of observations using backward algorithm.
-        :param observations_sequence: sequence of observations. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
-        :param decode: bool, if the observation sequence must be coded with obs indices, or is already encoded
-        :return beta: beta matrix, defined as in https://en.wikipedia.org/wiki/Forward%E2%80%93backward_algorithm.
-                ndarray, n_states*n_time
-        """
-        # conversion of sequence with indexes
-        if decode:
-            obs_seq = self._convert_observations_sequence_to_index(observations_sequence)
-        else:
-            obs_seq = observations_sequence
-
-        # init variables
-        n_time = len(obs_seq)
-        beta = np.zeros((self.n_states, n_time), self.fp_precision)
-
-        # Uniform init for final states
-        final_state_logproba = np.ones((self.n_states, )) / self.n_states
-
-        # final state
-        beta[:, n_time-1] = self.observation_logproba[:, obs_seq[n_time-1]] * final_state_logproba
-
-        # loop for each observation
-        for t in range(n_time - 2, -1, -1):
-            p_state_given_prev_state_and_obs = beta[:, t+1, np.newaxis] *\
-                                               self.transition_logproba *\
-                                               self.observation_logproba[:, obs_seq[t]]
-            beta[:, t] = np.sum(p_state_given_prev_state_and_obs, axis=0)
-
-        return beta
+        # convert to log-probabilities
+        self.initial_state_logproba = np.log(self.initial_state_logproba)
+        self.observation_logproba = np.log(self.observation_logproba)
+        self.transition_logproba = np.log(self.transition_logproba)
 
 
     def _expectation_sequence(self, observations_sequence):
@@ -286,13 +391,13 @@ class HMM:
         alpha = self.forward(obs_seq, decode=False)
         beta = self.backward(obs_seq, decode=False)
         # Estimated probability for the sequence: P(x_)
-        proba_seq = np.sum(alpha[:, n_time-1])
+        proba_seq = np.sum(alpha[:, n_time - 1])
 
         # estimated joint probability of hidden states, and sequence. P(h=i, x_): (n_states, n_time)
-        state_proba_seq = alpha*beta
+        state_proba_seq = alpha * beta
 
         # estimated probability of intitial hidden states, knowing the sequence: (n_states, 1)
-        init_proba_seq = state_proba_seq[:, 0]/proba_seq
+        init_proba_seq = state_proba_seq[:, 0] / proba_seq
 
         # Estimated emission through time, knowning the sequence: P(ht=i, xt=x|x_)
         observation_proba_seq = np.zeros((self.n_states, self.n_observations, n_time), self.fp_precision)
@@ -304,12 +409,12 @@ class HMM:
         # Estimated transition through time, knowning the sequence: P(ht=i, xt=x|x_)
         transition_proba_seq = np.zeros((self.n_states, self.n_states, n_time), self.fp_precision)
 
-        for t in range(n_time-1):
+        for t in range(n_time - 1):
             obs_idx = obs_seq[t]
             transition_proba_seq[:, :, t] = (alpha[:, t] *
                                              self.transition_logproba *
                                              self.observation_logproba[:, obs_idx].T *
-                                             beta[:, t+1].T) / proba_seq
+                                             beta[:, t + 1].T) / proba_seq
 
         return proba_seq, init_proba_seq, np.sum(observation_proba_seq, axis=2), np.sum(transition_proba_seq, axis=2)
 
@@ -323,13 +428,12 @@ class HMM:
         :return counts_transition: ndarray (n_states, n_states), expected counts of transitions between states
         :return proba_seq_list: list of probability for each sequence of X
         """
-        print('-- EXPECTATION')
         # Expected counts for EM algorithm
         counts_init_state = np.zeros((self.n_states,), self.fp_precision)
         counts_observation = np.zeros((self.n_states, self.n_observations), self.fp_precision)
         counts_transition = np.zeros((self.n_states, self.n_states), self.fp_precision)
 
-        proba_seq_list = np.zeros((len(X), 1))
+        proba_seq_list = np.zeros(len(X))
 
         for (id_seq, seq) in enumerate(X):
             proba_seq, init_proba_seq, obs_proba_seq, trans_proba_seq = self._expectation_sequence(seq)
@@ -349,98 +453,13 @@ class HMM:
         :param counts_observation: ndarray (n_states, n_observations), expected counts of observations
         :param counts_transition: ndarray (n_states, n_states), expected counts of transitions between states
         """
-        print('-- MINIMIZATION')
         # Computation of model probability, with eps smoothing
         counts_init_state += 1. / self.n_states
         self.initial_state_logproba = counts_init_state / np.sum(counts_init_state)
         self.transition_logproba = counts_transition / np.atleast_2d(np.sum(counts_transition, axis=1)).T
         self.observation_logproba = counts_observation / np.atleast_2d(np.sum(counts_observation, axis=1)).T
 
-
-    def EM(self, X, max_iter=1000, epsilon=0.001):
-        """
-        Run Expectation/Minimization algorithm, to train a HMM model without supervision.
-        :param X: list of list, observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
-        """
-        # # Uniform Init. of the 3 distributions : observation, transition and initial states
-        # self.initial_state_logproba = np.ones((self.n_states,), self.fp_precision)/self.n_states
-        # self.observation_logproba = np.ones((self.n_states, self.n_observations),
-        #                                     self.fp_precision)/self.n_observations
-        # self.transition_logproba = np.ones((self.n_states, self.n_states),
-        #                                    self.fp_precision)/self.n_states
-
-        # Normal init
-        self.initial_state_logproba = np.random.rand(self.n_states)
-        self.initial_state_logproba /= np.sum(self.initial_state_logproba)
-        self.observation_logproba = np.random.rand(self.n_states, self.n_observations)
-        self.observation_logproba /= np.atleast_2d(np.sum(self.observation_logproba, axis=1)).T
-        self.transition_logproba = np.random.rand(self.n_states, self.n_states)
-        self.transition_logproba /= np.atleast_2d(np.sum(self.transition_logproba, axis=1)).T
-
-        cnt_init_state, cnt_observation, cnt_transition, proba_seq_list = self._expectation(X)
-
-        n_iter = 0
-        old_proba_seq_list = [0]*len(X)
-        delta = max([abs(old_P - new_P) for (old_P, new_P) in zip(old_proba_seq_list, proba_seq_list)])
-
-        while (delta > epsilon) and (n_iter < max_iter):
-            print('EM LOOP: n_iter=', n_iter)
-            # Minimization
-            self._minimization(cnt_init_state, cnt_observation, cnt_transition)
-
-            old_proba_seq_list = proba_seq_list.copy()
-
-            cnt_init_state, cnt_observation, cnt_transition, proba_seq_list = self._expectation(X)
-
-            delta = max([abs(old_P - new_P) for (old_P, new_P) in zip(old_proba_seq_list, proba_seq_list)])
-            n_iter += 1
-
-        self.initial_state_logproba = np.log(self.initial_state_logproba)
-        self.observation_logproba = np.log(self.observation_logproba)
-        self.transition_logproba = np.log(self.transition_logproba)
-
-
-    def predict(self, observations_sequences):
-        """
-        Predict the sequences of states from sequences of observations.
-        :param observations_sequences: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
-        :return states_sequences: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
-        """
-        states_sequences = [None] * len(observations_sequences)
-        for i_seq, obs_seq in enumerate(observations_sequences):
-            states_sequences[i_seq] = self.viterbi(obs_seq)
-        return states_sequences
-
-
-    def score(self, X, y, ignore_unk=True):
-        """
-        Run predictions on each observation sequence of the dataset and return accuracy score.
-        :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
-        :param y: list of states sequences. Ex: [['s1', 's2', 's3'], ['s1', 's2']]
-        :return: accuracy_tokens, accuracy_sequences: accuracy rates of predictions at tokens or sequences levels
-        """
-        true_predictions = 0
-        total_predictions = 0
-        true_sequences = 0
-        for obs_seq, states_seq in zip(X, y):
-            # run prediction
-            pred_states_seq = self.viterbi(obs_seq)
-
-            # if UNK are ignored, remove their predictions
-            if ignore_unk:
-                states_seq      = [states_seq[t]      for t in range(len(obs_seq)) if obs_seq[t] in self.X_index.keys()]
-                pred_states_seq = [pred_states_seq[t] for t in range(len(obs_seq)) if obs_seq[t] in self.X_index.keys()]
-
-            # check prediction
-            true_predictions += np.sum([states_seq[t] == pred_states_seq[t] for t in range(len(states_seq))])
-            total_predictions += len(states_seq)
-            true_sequences += (states_seq == pred_states_seq)
-
-        accuracy_tokens = true_predictions / total_predictions
-        accuracy_sequences = true_sequences / len(y)
-
-        return accuracy_tokens, accuracy_sequences
-
+    # --------------------------  UTILITIES  --------------------------
 
     def _make_indexes(self):
         """
