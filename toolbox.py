@@ -1,6 +1,7 @@
 import random
 import numpy as np
 import pickle
+
 from HMM import HMM, get_observations_states
 
 
@@ -269,7 +270,7 @@ def noisy_omission_dataset(X, y, thresh_proba=0.05):
     return noisy_X, noisy_y
 
 
-def display_correction_stats(X_test, y_test, y_test_pred, name="HMM"):
+def display_correction_stats(X_test, y_test, y_test_pred, name="HMM", dummy=True):
     """
     Given a HMM model and test dataset (observation, state), print accuracy and others statistics
     :param X_test: list of list of string, each string being an observation
@@ -278,7 +279,6 @@ def display_correction_stats(X_test, y_test, y_test_pred, name="HMM"):
     """
     # compute errors stats
     hmm_char_res, hmm_word_res = compute_corrections_stats(X_test, y_test, y_test_pred)
-    dummy_char_res, dummy_word_res = compute_corrections_stats(X_test, y_test, X_test)
 
     # display main results
     print("{} score on test set".format(name))
@@ -294,15 +294,17 @@ def display_correction_stats(X_test, y_test, y_test_pred, name="HMM"):
                                                             hmm_char_res['notypo_correction'] /
                                                             hmm_char_res['n_tokens'] * 100))
 
-    print("\nDummy score on test set")
-    print(" * accuracy on full words : {:.2f}%".format(dummy_word_res['accuracy'] * 100))
-    print(" * accuracy on letters    : {:.2f}%".format(dummy_char_res['accuracy'] * 100))
-    print("   > typos corrected      : {} ({:.2f}%)".format(dummy_char_res['typo_correction'],
-                                                            dummy_char_res['typo_correction'] /
-                                                            dummy_char_res['n_tokens'] * 100))
-    print("   > typos not corrected  : {} ({:.2f}%)".format(dummy_char_res['typo_nocorrection'],
-                                                            dummy_char_res['typo_nocorrection'] /
-                                                            dummy_char_res['n_tokens'] * 100))
-    print("   > typos added          : {} ({:.2f}%)".format(dummy_char_res['notypo_correction'],
-                                                            dummy_char_res['notypo_correction'] /
-                                                            dummy_char_res['n_tokens'] * 100))
+    if dummy:
+        dummy_char_res, dummy_word_res = compute_corrections_stats(X_test, y_test, X_test)
+        print("\nDummy score on test set")
+        print(" * accuracy on full words : {:.2f}%".format(dummy_word_res['accuracy'] * 100))
+        print(" * accuracy on letters    : {:.2f}%".format(dummy_char_res['accuracy'] * 100))
+        print("   > typos corrected      : {} ({:.2f}%)".format(dummy_char_res['typo_correction'],
+                                                                dummy_char_res['typo_correction'] /
+                                                                dummy_char_res['n_tokens'] * 100))
+        print("   > typos not corrected  : {} ({:.2f}%)".format(dummy_char_res['typo_nocorrection'],
+                                                                dummy_char_res['typo_nocorrection'] /
+                                                                dummy_char_res['n_tokens'] * 100))
+        print("   > typos added          : {} ({:.2f}%)".format(dummy_char_res['notypo_correction'],
+                                                                dummy_char_res['notypo_correction'] /
+                                                                dummy_char_res['n_tokens'] * 100))
