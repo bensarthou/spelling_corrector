@@ -6,8 +6,7 @@ from collections import Counter
 UNK = "<unk>"
 
 # Maximum matrices sizes for float32 or float64
-# It represents the maximum number of valuesof these types we can store to keep
-# matrices size resaonnable
+# It represents the maximum number of values of these types we can store to keep matrices size reasonable
 F64_MAX_SIZE = 1e6
 F32_MAX_SIZE = 5e6
 

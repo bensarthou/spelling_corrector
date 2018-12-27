@@ -126,7 +126,6 @@ def noisy_insertion(X_train, y_train, X_test, y_test, thresh_proba=0.05):
 
     :return noisy_train_set, train_set with inserted observations (state being '_')
     :return noisy_test_set, test_set with inserted observations (state being '_')
-
     """
 
     # Compute state space
@@ -143,7 +142,6 @@ def noisy_insertion(X_train, y_train, X_test, y_test, thresh_proba=0.05):
 
 
 def noisy_insertion_dataset(X, y, hmm, thresh_proba=0.05):
-
     """
     Given a dataset of letters (observed and real), and a HMM model learned, add noisy insertion of
      letters in the dataset, according to previous state and observation.
@@ -189,7 +187,7 @@ def noisy_insertion_dataset(X, y, hmm, thresh_proba=0.05):
 def noisy_omission(X_train, y_train, X_test, y_test, thresh_proba=0.05):
     """
     Given a train and test dataset of letters (observed, real) return
-     datasets with noisy omissions of letters, meaning an  unique observation can come from
+     datasets with noisy omissions of letters, meaning an unique observation can come from
      two successives states.
 
     :param X_train: list of list of string, each string being an observation,
@@ -202,7 +200,6 @@ def noisy_omission(X_train, y_train, X_test, y_test, thresh_proba=0.05):
 
     :return noisy_train_set, train_set with omitted observations
     :return noisy_test_set, test_set with omitted observations
-
     """
 
     noisy_X_train, noisy_y_train = noisy_omission_dataset(X_train, y_train,
@@ -214,7 +211,6 @@ def noisy_omission(X_train, y_train, X_test, y_test, thresh_proba=0.05):
 
 
 def noisy_omission_dataset(X, y, thresh_proba=0.05):
-
     """
     Given a dataset of letters (observed and real), add noisy deletion of
      letters in the dataset, by combining 2 successives states, giving an unique observation.
@@ -225,47 +221,34 @@ def noisy_omission_dataset(X, y, thresh_proba=0.05):
 
     :return a noisy dataset, with deletion of observation (same format as dataset)
     """
-
     noisy_X = []
     noisy_y = []
 
-    for (i, word) in enumerate(X):
-        new_word_obs, new_word_state = [], []
-        j = 0
+    for i_word in range(len(X)):
 
-        skip = False
+        # if word is only 1-length long, skip it
+        if len(X[i_word]) <= 1:
+            noisy_X.append(X[i_word])
+            noisy_y.append(y[i_word])
 
-        while j < len(word)-1:
-            skip = False
+        # otherwise, loop on letters of the word
+        else:
+            new_word_obs, new_word_state = [], []
+            skipped_state = ''
+            for i_letter in range(len(X[i_word])):
 
-            r = np.random.rand()
-            if r < thresh_proba and len(word) != 1:
+                # with some given proba, skip current observation and combine the two successive states into one
+                if (np.random.rand() < thresh_proba) and (i_letter < len(X[i_word]) -1) and not skipped_state:
+                    skipped_state += y[i_word][i_letter]
 
-                skip = True
+                else:
+                    new_word_obs.append(X[i_word][i_letter])
+                    new_word_state.append(skipped_state + y[i_word][i_letter])
+                    skipped_state = ''
 
-                observation_next_letter = word[j+1]
-                state_letter, state_next_letter = y[i][j], y[i][j+1]
-
-                # Combine the two states (current and previous) into one
-                new_word_obs.append(observation_next_letter)
-                new_word_state.append(state_letter + state_next_letter)
-
-                j += 2
-
-            else:
-                new_word_obs.append(word[j])
-                new_word_state.append(y[i][j])
-
-                j += 1
-
-        # at the end of the word, if we haven't already skip the last observation due to omission,
-        #    add the last letter to the word
-        if not skip:
-            new_word_obs.append(word[len(word)-1])
-            new_word_state.append(y[i][len(word)-1])
-
-        noisy_X.append(new_word_obs)
-        noisy_y.append(new_word_state)
+            # add noisy observations and modified states to dataset
+            noisy_X.append(new_word_obs)
+            noisy_y.append(new_word_state)
 
     return noisy_X, noisy_y
 
