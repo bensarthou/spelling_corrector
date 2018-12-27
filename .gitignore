@@ -1,4 +1,5 @@
-typos-datas/
 *.pyc
 data/
 .ipynb_checkpoints/
+.idea/*
+draft.py
