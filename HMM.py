@@ -91,7 +91,7 @@ class HMM:
         self._make_indexes()
 
 
-    def fit(self, X, y=None, smoothing='epsilon', max_iter=10, tol=0.01):
+    def fit(self, X, y=None, smoothing='epsilon', max_iter=10, tol=0.0001):
         """
         Estimate HMM parameters (initial, transition and emisson matrices) from a training data set.
         :param X: list of observations sequences. Ex: [['o1', 'o2', 'o3'], ['o1', 'o2']]
@@ -358,7 +358,7 @@ class HMM:
 
     # --------------------------  UNSUPERVISED TRAINING  --------------------------
 
-    def EM(self, X, max_iter=10, tol=0.01):
+    def EM(self, X, max_iter=10, tol=0.0001):
         """
         Run Expectation/Maximization algorithm, to train a HMM model without supervision.
         Inspired from http://karlstratos.com/notes/em_hmm_formulation.pdf
@@ -391,7 +391,7 @@ class HMM:
             self._maximization(cnt_init_state, cnt_observation, cnt_transition)
 
             # check convergence
-            delta = np.max(np.abs(proba_seq_list - old_proba_seq_list))
+            delta = np.mean(np.abs(proba_seq_list - old_proba_seq_list))
             n_iter += 1
             old_proba_seq_list = np.array(proba_seq_list.copy())
             if self.verbose:
